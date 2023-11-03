@@ -139,46 +139,28 @@ class QG_model():
         
         return torch.stack((psi_recons1,psi_recons2))
     
-    def diffx(self,x,prints=False):
+    @staticmethod
+    def diffx(self,x,dx):
         """ Central difference approximation to the spatial derivative in x direction 
             nb that our indices are [layer,y coordinate, x coordinate] so we torch.roll in
             dimension 2 for x derivative """
-        if prints:
-            x_plus_one=torch.roll(x,shifts=-1,dims=2)
-            x_minus_one=torch.roll(x,shifts=1,dims=2)
-            print("x_+1")
-            print(x_plus_one)
-            print("x_-1")
-            print(x_minus_one)
-            print("denom=",2*self.dx)
-            print("prints done")
 
-        return (torch.roll(x,shifts=-1,dims=2)-torch.roll(x,shifts=1,dims=2))/(2*self.dx)
+        return (torch.roll(x,shifts=-1,dims=2)-torch.roll(x,shifts=1,dims=2))/(2*dx)
 
-    def diffy(self,x,prints=False):
+    @staticmethod
+    def diffy(self,x,dx):
         """ Central difference approximation to the spatial derivative in x direction 
             nb that our indices are [layer,y coordinate, x coordinate] so we torch.roll in
             dimension 1 for y derivative """
-        
-        if prints:
-            x_plus_one=torch.roll(x,shifts=-1,dims=1)
-            x_minus_one=torch.roll(x,shifts=1,dims=1)
-            print("x_+1")
-            print(x_plus_one)
-            print("x_-1")
-            print(x_minus_one)
-            print("denom=",2*self.dx)
-            print(x_plus_one-x_minus_one)
-            print("prints done")
 
-        return (torch.roll(x,shifts=-1,dims=1)-torch.roll(x,shifts=1,dims=1))/(2*self.dx)
+        return (torch.roll(x,shifts=-1,dims=1)-torch.roll(x,shifts=1,dims=1))/(2*dx)
     
     def _advect(self,q,psi):
         """ Arakawa advection scheme of q """
         
-        f1 = self.diffx(psi)*self.diffy(q) - self.diffy(psi)*self.diffx(q)
-        f2 = self.diffy(self.diffx(psi)*q) - self.diffx(self.diffy(psi)*q)
-        f3 = self.diffx(self.diffy(q)*psi) - self.diffy(self.diffx(q)*psi)
+        f1 = self.diffx(psi,self.dx)*self.diffy(q,self.dx) - self.diffy(psi,self.dx)*self.diffx(q,self.dx)
+        f2 = self.diffy(self.diffx(psi,self.dx)*q,self.dx) - self.diffx(self.diffy(psi,self.dx)*q,self.dx)
+        f3 = self.diffx(self.diffy(q,self.dx)*psi,self.dx) - self.diffy(self.diffx(q,self.dx)*psi,self.dx)
         
         f = - (f1 + f2 + f3) / 3
         return f
@@ -226,4 +208,3 @@ class QG_model():
         """
                 
         return q+self.rhs(q)*self.dt
-        
