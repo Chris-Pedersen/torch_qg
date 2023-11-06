@@ -1,0 +1,3 @@
+numpy
+pytest
+pytorch==2.0.0
