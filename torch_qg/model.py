@@ -1,5 +1,6 @@
 import torch
 import math
+from tqdm import tqdm
 
 class QG_model():
     def __init__(
@@ -49,7 +50,7 @@ class QG_model():
         self.W = L
         self.nl = nx
         self.nk = nx/2 + 1
-        self.dt = 3600
+        self.dt = dt
         
         self._initialise_q1q2()
         self._initialise_background()
@@ -88,6 +89,7 @@ class QG_model():
         
         ## Torch meshgrid produces arrays with opposite indices to numpy, so we take the transpose
         self.k=self.k.T
+        self.k2=self.k*self.k
         self.l=self.l.T
         self.ik = 1j*self.k
         self.il = 1j*self.l
@@ -163,7 +165,7 @@ class QG_model():
         #### Spatial derivatives ####
         ## Spatial derivative of streamfunction using Fourier tensor
         dpsi=torch.fft.irfftn(self.ik*ph,dim=(1,2))
-        d2psi=torch.fft.irfftn(self.kappa2*ph,dim=(1,2))
+        d2psi=torch.fft.irfftn(self.k2*ph,dim=(1,2))
         dq=torch.fft.irfftn(self.ik*qh,dim=(1,2))
         
         rhs=-1*self._advect(q,psi)
@@ -187,6 +189,12 @@ class QG_model():
         """
                 
         return q+self.rhs(q)*self.dt
+    
+    def run_sim(self,steps):
+        for aa in tqdm(range(steps)):
+            self.q=self.timestep(self.q)
+            
+        return
     
     
 class QG_model_spectral():
