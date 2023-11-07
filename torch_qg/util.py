@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from IPython.display import HTML
+import cmocean
 
 class SimAnimation():
     def __init__(self,qinit,kernel,fps=10,nSteps=1000,normalise=True):
