@@ -51,14 +51,15 @@ class QG_model():
         self.nk = nx/2 + 1
         self.dt = 3600
         
-        # the F parameters
+        self._initialise_q1q2()
+        self._initialise_background()
+        self._initialise_grid()
+        
+    def _initialise_background(self):
+        
         self.F1 = self.rd**-2 / (1.+self.delta)
         self.F2 = self.delta*self.F1
-
-
-        # initial conditions: (PV anomalies)
-        self._initialise_q1q2()
-        self._initialise_grid()
+        self.betas=torch.tensor([self.beta-self.F1*(self.U1-self.U2),self.beta+self.F1*(self.U1-self.U2)])
         
     def _initialise_grid(self):
         """ Set up real-space and spectral-space grids """
@@ -153,7 +154,6 @@ class QG_model():
         
         ## FFT of potential vorticity
         qh=torch.fft.rfftn(q,dim=(1,2))
-        ## Spatial derivative of q field
         
         ## Invert coupling matrix to get streamfunction in Fourier domain
         ph=self._invert(qh)
@@ -166,13 +166,9 @@ class QG_model():
         d2psi=torch.fft.irfftn(self.kappa2*ph,dim=(1,2))
         dq=torch.fft.irfftn(self.ik*qh,dim=(1,2))
         
-        ## Background quantities
-        beta_upper=self.beta-self.F1*(self.U1-self.U2)
-        beta_lower=self.beta+self.F2*(self.U1-self.U2)
-        
         rhs=-1*self._advect(q,psi)
-        rhs[0]+=(-beta_upper*dpsi[0])
-        rhs[1]+=(-beta_lower*dpsi[1])
+        rhs[0]+=(-self.betas[0]*dpsi[0])
+        rhs[1]+=(-self.betas[1]*dpsi[1])
         
         rhs[0]+=-dq[0]*self.U1
         rhs[1]+=-dq[1]*self.U2
