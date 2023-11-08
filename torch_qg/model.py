@@ -89,7 +89,7 @@ class QG_model():
         
         ## Torch meshgrid produces arrays with opposite indices to numpy, so we take the transpose
         self.k=self.k.T
-        self.k2=self.k*self.k
+        #self.k2=self.k*self.k
         self.l=self.l.T
         self.ik = 1j*self.k
         self.il = 1j*self.l
@@ -165,7 +165,7 @@ class QG_model():
         #### Spatial derivatives ####
         ## Spatial derivative of streamfunction using Fourier tensor
         dpsi=torch.fft.irfftn(self.ik*ph,dim=(1,2))
-        d2psi=torch.fft.irfftn(self.k2*ph,dim=(1,2))
+        d2psi=torch.fft.irfftn(-self.kappa2*ph,dim=(1,2))
         dq=torch.fft.irfftn(self.ik*qh,dim=(1,2))
         
         rhs=-1*self._advect(q,psi)
@@ -180,19 +180,51 @@ class QG_model():
         
         return rhs
         
-    def timestep(self,q):
-        """ Advance system forward in time one step """
-        
-        """ 1. Need a function for the RHS
-            2. Pass RHS to some numerical solver
-            
-        """
+    def timestep_euler(self,q):
+        """ Advance system forward in time one step using forward Euler """
                 
         return q+self.rhs(q)*self.dt
     
+    def run_ab(self,q,steps,store_snaps=False):
+        """ Advance system forward in time using AB3 """
+        rhs_n=None
+        rhs_n_minus_one=None
+        rhs_n_minus_two=None
+        snaps=None
+        
+        if store_snaps:
+            ## Initialise empty tensor to store q of shape
+            ## [step_index,layer number, nx, ny]
+            snaps=torch.empty((steps,2,self.nx,self.nx))
+        
+        for aa in tqdm(range(steps)):
+            ## If we have no n_{i-1} timestep, we just do forward Euler
+            if rhs_n_minus_one==None:
+                self.q=q+self.rhs(q)*self.dt
+                ## Store rhs as rhs_{i-1}
+                rhs_n_minus_one=self.rhs(q)
+            ## If we have no n_{i-2} timestep, we do AB2
+            elif rhs_n_minus_two==None:
+                rhs=self.rhs(self.q)
+                self.q=self.q+(0.5*self.dt)*(3*rhs-rhs_n_minus_one)
+                ## Update previous timestep rhs
+                rhs_n_minus_two=rhs_n_minus_one
+                rhs_n_minus_one=rhs
+            else:
+                ## If we have two previous timesteps stored, use AB3
+                rhs=self.rhs(self.q)
+                self.q=self.q+(self.dt/12.)*(23*rhs-16*rhs_n_minus_one+5*rhs_n_minus_two)
+                ## Update previous timesteps
+                rhs_n_minus_two=rhs_n_minus_one
+                rhs_n_minus_one=rhs
+            if store_snaps:
+                snaps[aa]=self.q
+            
+        return snaps
+    
     def run_sim(self,steps):
         for aa in tqdm(range(steps)):
-            self.q=self.timestep(self.q)
+            self.q=self.timestep_euler(self.q)
             
         return
     
@@ -245,7 +277,7 @@ class QG_model_spectral():
         self.W = L
         self.nl = nx
         self.nk = nx/2 + 1
-        self.dt = 3600
+        self.dt = dt
         
         # the F parameters
         self.F1 = self.rd**-2 / (1.+self.delta)
