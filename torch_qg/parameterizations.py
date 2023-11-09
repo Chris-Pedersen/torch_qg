@@ -46,8 +46,8 @@ class Smagorinsky():
             model). Defaults to false.
         """
         ## Get u, v in spectral space
-        uh=-ik*ph
-        vh=il*ph
+        uh=-il*ph
+        vh=ik*ph
         Sxx = torch.fft.irfftn(uh*ik,dim=(1,2))
         Syy = torch.fft.irfftn(vh*il,dim=(1,2))
         Sxy = 0.5 * torch.fft.irfftn(uh * il + vh * ik)
