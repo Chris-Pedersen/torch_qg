@@ -47,43 +47,16 @@ class Smagorinsky():
         """
         ## Get u, v in spectral space
         uh=-ik*ph
-        vh=-il*ph
-        Sxx = torch.irfftn(uh,dim=(1,2))
-        Syy = torch.irfftn(vu,dim=(1,2))
-        Sxy = 0.5 * m.irfftn(uh * il + vh * ik)
+        vh=il*ph
+        Sxx = torch.fft.irfftn(uh*ik,dim=(1,2))
+        Syy = torch.fft.irfftn(vh*il,dim=(1,2))
+        Sxy = 0.5 * torch.fft.irfftn(uh * il + vh * ik)
         nu = (self.constant * dx)**2 * torch.sqrt(2 * (Sxx**2 + Syy**2 + 2 * Sxy**2))
-        nu_Sxxh = torch.rfftn(nu * Sxx,dim=(1,2))
-        nu_Sxyh = torch.rfftn(nu * Sxy,dim=(1,2))
-        nu_Syyh = torch.rfftn(nu * Syy,dim=(1,2))
-        du = 2 * (torch.irfftn(nu_Sxxh * ik,dim=(1,2)) + torch.irfftn(nu_Sxyh * il,dim=(1,2)))
-        dv = 2 * (torch.irfftn(nu_Sxyh * ik,dim=(1,2)) + torch.irfftn(nu_Syyh * il,dim=(1,2)))
+        nu_Sxxh = torch.fft.rfftn(nu * Sxx,dim=(1,2))
+        nu_Sxyh = torch.fft.rfftn(nu * Sxy,dim=(1,2))
+        nu_Syyh = torch.fft.rfftn(nu * Syy,dim=(1,2))
+        du = 2 * (torch.fft.irfftn(nu_Sxxh * ik,dim=(1,2)) + torch.fft.irfftn(nu_Sxyh * il,dim=(1,2)))
+        dv = 2 * (torch.fft.irfftn(nu_Sxyh * ik,dim=(1,2)) + torch.fft.irfftn(nu_Syyh * il,dim=(1,2)))
         ## Take curl to convert u, v forcing to potential vorticity forcing
-        dq = -torch.irfft(il*torch.rfft(du))+torch.irfft(ik*torch.rfft(dv))
+        dq = -torch.fft.irfftn(il*torch.fft.rfftn(du,dim=(1,2)),dim=(1,2))+torch.fft.irfftn(ik*torch.fft.rfftn(dv,dim=(1,2)),dim=(1,2))
         return dq
-
-    
-        def __call__(self, m, just_viscosity=False):
-        r"""
-        Parameters
-        ----------
-        m : Model
-            The model for which we are evaluating the parameterization.
-        just_viscosity : bool
-            Whether to just return the eddy viscosity (e.g. for use in a
-            different parameterization which assumes a Smagorinsky dissipation
-            model). Defaults to false.
-        """
-        uh = m.fft(m.u)
-        vh = m.fft(m.v)
-        Sxx = m.ifft(uh * m.ik)
-        Syy = m.ifft(vh * m.il)
-        Sxy = 0.5 * m.ifft(uh * m.il + vh * m.ik)
-        nu = (self.constant * m.dx)**2 * np.sqrt(2 * (Sxx**2 + Syy**2 + 2 * Sxy**2))
-        if just_viscosity:
-            return nu
-        nu_Sxxh = m.fft(nu * Sxx)
-        nu_Sxyh = m.fft(nu * Sxy)
-        nu_Syyh = m.fft(nu * Syy)
-        du = 2 * (m.ifft(nu_Sxxh * m.ik) + m.ifft(nu_Sxyh * m.il))
-        dv = 2 * (m.ifft(nu_Sxyh * m.ik) + m.ifft(nu_Syyh * m.il))
-        return du, dv
