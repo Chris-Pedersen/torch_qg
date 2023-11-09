@@ -15,6 +15,7 @@ class QG_model():
         H1 = 500,                   # depth of layer 1 (H1)
         U1=0.025,                   # upper layer flow
         U2=0.0,                     # lower layer flow
+        parameterization=None,      # parameterization
         **kwargs
         ):
         """
@@ -51,6 +52,7 @@ class QG_model():
         self.nl = nx
         self.nk = nx/2 + 1
         self.dt = dt
+        self.parameterization = parameterization
         
         self._initialise_q1q2()
         self._initialise_background()
@@ -88,9 +90,8 @@ class QG_model():
         self.k, self.l = torch.meshgrid(self.kk, self.ll)
         
         ## Torch meshgrid produces arrays with opposite indices to numpy, so we take the transpose
-        self.k=self.k.T
-        #self.k2=self.k*self.k
-        self.l=self.l.T
+        self.k=self.k.T ## Zonal
+        self.l=self.l.T ## Meridional
         self.ik = 1j*self.k
         self.il = 1j*self.l
         
@@ -177,6 +178,9 @@ class QG_model():
         
         ## Bottom drag
         rhs[1]+=-self.rek*d2psi[1]
+        
+        if self.parameterization is not None:
+            rhs+=self.parameterization(q,ph,self.ik,self.il,self.dx)
         
         return rhs
         
@@ -336,15 +340,26 @@ class QG_model_spectral():
         return
     
     
-    def _advection(self):
-    
-    
-    
-    
-    
-    
-    
-        return
+    def _advect(self,q,psi):
+        """Given real inputs q, u, v, returns the advective tendency for
+        q in spectral space."""
+        
+        u = self.u
+        v = self.v
+        
+        uq = u*q
+        vq = v*q
+        # this is a hack, since fft now requires input to have shape (nz,ny,nx)
+        # it does an extra unnecessary fft
+        is_2d = (uq.ndim==2)
+        if is_2d:
+            uq = np.tile(uq[np.newaxis,:,:], (self.nz,1,1))
+            vq = np.tile(vq[np.newaxis,:,:], (self.nz,1,1))
+        tend = self.ik*self.fft(uq) + self.il*self.fft(vq)
+        if is_2d:
+            return tend[0]
+        else:
+            return tend
     
     
     def _invert(self,qh):
@@ -377,15 +392,6 @@ class QG_model_spectral():
 
         return (torch.roll(x,shifts=-1,dims=1)-torch.roll(x,shifts=1,dims=1))/(2*dx)
     
-    def _advect(self,q,psi):
-        """ Arakawa advection scheme of q """
-        
-        f1 = self.diffx(psi,dx=self.dx)*self.diffy(q,self.dx) - self.diffy(psi,self.dx)*self.diffx(q,self.dx)
-        f2 = self.diffy(self.diffx(psi,self.dx)*q,self.dx) - self.diffx(self.diffy(psi,self.dx)*q,self.dx)
-        f3 = self.diffx(self.diffy(q,self.dx)*psi,self.dx) - self.diffy(self.diffx(q,self.dx)*psi,self.dx)
-        
-        f = - (f1 + f2 + f3) / 3
-        return f
         
     def rhs(self,q):
         """ Build a tensor of dq/dt """
@@ -409,7 +415,7 @@ class QG_model_spectral():
         beta_upper=self.beta-self.F1*(self.U1-self.U2)
         beta_lower=self.beta+self.F2*(self.U1-self.U2)
         
-        rhs=-1*self._advect(q,psi)
+        rhs=-1*self._advect(q,ph)
         rhs[0]+=(-beta_upper*dpsi[0])
         rhs[1]+=(-beta_lower*dpsi[1])
         
