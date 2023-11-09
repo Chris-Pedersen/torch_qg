@@ -2,16 +2,16 @@ import torch
 import math
 from tqdm import tqdm
 
-def clean_2hxx(X):
+def clean_2h__(X):
     '''
     Remove frequencies which potentially
     can harm reversibility of rfftn
     '''
-    Xf = torch.fft.rfftn(X)
+    Xf = torch.fft.rfftn(X,dim=(1,2))
     n = X.shape[0] // 2
     Xf[n,0] = 0
     Xf[:,n] = 0
-    return torch.fft.irfftn(Xf)
+    return torch.fft.irfftn(Xf,dim=(1,2))
 
 def clean_2h(X):
     return X
@@ -87,6 +87,7 @@ class QG_model():
         ## physical grid spacing
         self.dx = self.L / self.nx
         self.dy = self.W / self.ny
+        self.M = self.nx*self.ny
 
         # Notice: at xi=1 U=beta*rd^2 = c for xi>1 => U>c
         # wavenumber one (equals to dkx/dky)
@@ -111,6 +112,7 @@ class QG_model():
         
         ## kappa2 represents the wavenumber squared at each gridpoint
         self.kappa2=(self.l**2+self.k**2)
+        self.kappa=torch.sqrt(self.kappa2)
         
         
         ## Evaluate 2x2 matrix determinant for calculation of streamfunction
@@ -118,8 +120,19 @@ class QG_model():
         ## Set to false value so matrix inversion doesn't throw warnings
         self.determinant[0,0]=1e-19
         
-        return
         
+        ## spectral grid for isoptrically averaged spectra
+        ll_max = torch.abs(self.ll).max()
+        kk_max = torch.abs(self.kk).max()
+        kmax = torch.minimum(ll_max, kk_max)
+        kmin = 0
+        dkr = math.sqrt(self.dk**2 + self.dl**2)
+        # left border of bins
+        kr = torch.arange(kmin, kmax, dkr)
+        # convert left border of the bin to center
+        self.kr = kr + dkr/2
+        
+        return
     
     def _initialise_q1q2(self):
         self.q=torch.stack((1e-7*torch.rand(self.ny,self.nx) + 1e-6*(torch.ones((self.ny,1)) * torch.rand(1,self.nx) ),torch.zeros(self.nx,self.nx)))
@@ -139,6 +152,46 @@ class QG_model():
         ph2[0,0]=0
         
         return torch.stack((ph1,ph2))
+    
+    def calc_ispec(self,var_dens):
+        # account for complex conjugate
+        var_dens[...,0] /= 2
+        var_dens[...,-1] /= 2
+
+        ll_max = torch.abs(self.ll).max()
+        kk_max = torch.abs(self.kk).max()
+        kmax = torch.minimum(ll_max, kk_max)
+
+        kmin = 0
+
+        dkr = math.sqrt(self.dk**2 + self.dl**2)
+
+        # left border of bins
+        kr = torch.arange(kmin, kmax, dkr)
+
+        phr = torch.zeros(kr.shape[0])
+
+        for i in range(kr.shape[0]):
+            if i == kr.shape[0]-1:
+                fkr = (self.kappa>=kr[i]) & (self.kappa<=kr[i]+dkr)
+            else:
+                fkr = (self.kappa>=kr[i]) & (self.kappa<kr[i+1])
+            phr[i] = var_dens[fkr].mean() * (kr[i]+dkr/2) * math.pi / (self.dk * self.dl)
+            phr[i] *= 2 # include full circle
+
+        # convert left border of the bin to center
+        kr = kr + dkr/2
+
+        return kr, phr
+    
+    def get_KE_ispec(self,qh):
+        KEspec=(self.kappa2*torch.abs(qh)**2/self.M**2)
+        k,KEs_upper = self.calc_ispec(KEspec[0])
+        k,KEs_lower = self.calc_ispec(KEspec[1])
+        KEs_both=torch.vstack((KEs_upper,KEs_lower))
+        
+        return k,KEs_both
+        
     
     @staticmethod
     def diffx(x,dx):
@@ -166,7 +219,7 @@ class QG_model():
         f = - (f1 + f2 + f3) / 3
         return f
         
-    def rhs(self,q):
+    def rhs(self,q,return_qh=False):
         """ Build a tensor of dq/dt """
         
         ## FFT of potential vorticity
@@ -196,7 +249,10 @@ class QG_model():
         if self.parameterization is not None:
             rhs+=self.parameterization(q,ph,self.ik,self.il,self.dx)
         
-        return rhs
+        if return_qh:
+            return rhs, qh
+        else:
+            return rhs
         
     def timestep_euler(self,q):
         """ Advance system forward in time one step using forward Euler """
@@ -209,41 +265,44 @@ class QG_model():
         rhs_n_minus_one=None
         rhs_n_minus_two=None
         snaps=None
+        KEs=None
         
         if store_snaps:
             ## Initialise empty tensor to store q of shape
             ## [step_index,layer number, nx, ny]
             snaps=torch.empty((steps,2,self.nx,self.nx))
+            KEs=torch.empty((steps,2,len(self.kr)))
         
         for aa in tqdm(range(steps)):
             ## If we have no n_{i-1} timestep, we just do forward Euler
             if rhs_n_minus_one==None:
                 self.q=clean_2h(q+self.rhs(q)*self.dt)
                 ## Store rhs as rhs_{i-1}
-                rhs_n_minus_one=self.rhs(q)
+                rhs_n_minus_one, qh=self.rhs(q, True)
             ## If we have no n_{i-2} timestep, we do AB2
             elif rhs_n_minus_two==None:
-                rhs=self.rhs(self.q)
+                rhs, qh=self.rhs(self.q, True)
                 self.q=clean_2h(self.q+(0.5*self.dt)*(3*rhs-rhs_n_minus_one))
                 ## Update previous timestep rhs
                 rhs_n_minus_two=rhs_n_minus_one
                 rhs_n_minus_one=rhs
             else:
                 ## If we have two previous timesteps stored, use AB3
-                rhs=self.rhs(self.q)
+                rhs,qh=self.rhs(self.q,True) ## Return qh to get 
                 self.q=clean_2h(self.q+(self.dt/12.)*(23*rhs-16*rhs_n_minus_one+5*rhs_n_minus_two))
                 ## Update previous timesteps
                 rhs_n_minus_two=rhs_n_minus_one
                 rhs_n_minus_one=rhs
             if store_snaps:
                 snaps[aa]=self.q
+                self.kr,KEs[aa]=self.get_KE_ispec(qh)
                 
             ## If we hit NaNs, stop the show
             if torch.sum(torch.isnan(self.q))!=0:
                 print("NaNs in pv field, stopping sim")
                 break
             
-        return snaps
+        return [snaps,KEs]
     
     def run_sim(self,steps):
         for aa in tqdm(range(steps)):
