@@ -251,7 +251,9 @@ class QG_model():
             
         return
     
-
+    
+### WIP  - not functional yet
+import numpy as np
 class QG_model_spectral():
     def __init__(
         self,
