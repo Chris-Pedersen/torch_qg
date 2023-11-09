@@ -2,6 +2,20 @@ import torch
 import math
 from tqdm import tqdm
 
+def clean_2hxx(X):
+    '''
+    Remove frequencies which potentially
+    can harm reversibility of rfftn
+    '''
+    Xf = torch.fft.rfftn(X)
+    n = X.shape[0] // 2
+    Xf[n,0] = 0
+    Xf[:,n] = 0
+    return torch.fft.irfftn(Xf)
+
+def clean_2h(X):
+    return X
+
 class QG_model():
     def __init__(
         self,
@@ -204,25 +218,30 @@ class QG_model():
         for aa in tqdm(range(steps)):
             ## If we have no n_{i-1} timestep, we just do forward Euler
             if rhs_n_minus_one==None:
-                self.q=q+self.rhs(q)*self.dt
+                self.q=clean_2h(q+self.rhs(q)*self.dt)
                 ## Store rhs as rhs_{i-1}
                 rhs_n_minus_one=self.rhs(q)
             ## If we have no n_{i-2} timestep, we do AB2
             elif rhs_n_minus_two==None:
                 rhs=self.rhs(self.q)
-                self.q=self.q+(0.5*self.dt)*(3*rhs-rhs_n_minus_one)
+                self.q=clean_2h(self.q+(0.5*self.dt)*(3*rhs-rhs_n_minus_one))
                 ## Update previous timestep rhs
                 rhs_n_minus_two=rhs_n_minus_one
                 rhs_n_minus_one=rhs
             else:
                 ## If we have two previous timesteps stored, use AB3
                 rhs=self.rhs(self.q)
-                self.q=self.q+(self.dt/12.)*(23*rhs-16*rhs_n_minus_one+5*rhs_n_minus_two)
+                self.q=clean_2h(self.q+(self.dt/12.)*(23*rhs-16*rhs_n_minus_one+5*rhs_n_minus_two))
                 ## Update previous timesteps
                 rhs_n_minus_two=rhs_n_minus_one
                 rhs_n_minus_one=rhs
             if store_snaps:
                 snaps[aa]=self.q
+                
+            ## If we hit NaNs, stop the show
+            if torch.sum(torch.isnan(self.q))!=0:
+                print("NaNs in pv field, stopping sim")
+                break
             
         return snaps
     
@@ -232,7 +251,7 @@ class QG_model():
             
         return
     
-    
+
 class QG_model_spectral():
     def __init__(
         self,
