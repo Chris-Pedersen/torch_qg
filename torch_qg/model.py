@@ -179,12 +179,26 @@ class BaseQGModel():
         
         return torch.stack((ph1,ph2))
 
-    def run_sim(self,steps):
+    def run_sim(self,steps,store=False):
         """ Evolve system forward in time by some number of steps """
+
+        ## For now, lets just have the option to store all snapshots as we run
+        ## can add more complexity here once we trust the solver
+        store_snaps=None
+        if store==True:
+            store_snaps=torch.empty((steps,2,self.nx,self.nx))
+
         for aa in tqdm(range(steps)):
+            if store==True:
+                store_snaps[aa]=self.q
             self._step_ab3()
 
-        return
+            ## If we hit NaNs, stop the show
+            if torch.sum(torch.isnan(self.q))!=0:
+                print("NaNs in pv field, stopping sim")
+                break
+
+        return store_snaps
 
     def _step_ab3(self):
         raise NotImplementedError("Implemented by subclass")
@@ -285,7 +299,6 @@ class ArakawaModel(BaseQGModel):
         self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
 
 
-
 class PseudoSpectralModel(BaseQGModel):
     def __init__(self,*args,**kwargs):
         #super(BaseQGModel,self).__init__(*args,**kwargs)
@@ -295,6 +308,24 @@ class PseudoSpectralModel(BaseQGModel):
         """ Pseudo-spectra advection """
         
         raise NotImplementedError("Not yet implemented")
+
+        """Given real inputs q, u, v, returns the advective tendency for
+        q in spectral space."""
+        if u is None:
+            u = self.u
+        if v is None:
+            v = self.v
+        uq = u*q
+        vq = v*q
+        # this is a hack, since fft now requires input to have shape (nz,ny,nx)
+        # it does an extra unnecessary fft
+        is_2d = (uq.ndim==2)
+        if is_2d:
+            uq = np.tile(uq[np.newaxis,:,:], (self.nz,1,1))
+            vq = np.tile(vq[np.newaxis,:,:], (self.nz,1,1))
+        tend = self.ik*self.fft(uq) + self.il*self.fft(vq)
+
+        return tend
 
     def rhs(self,q,qh,psi,psih):
         """ Build a tensor of dq/dt. Does not update any state variables. """
