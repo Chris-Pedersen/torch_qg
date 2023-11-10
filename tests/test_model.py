@@ -11,8 +11,8 @@ def test_advection1():
     q=torch.stack((torch.rand(nx,nx,dtype=torch.float64),torch.rand(nx,nx,dtype=torch.float64)))
 
     ## Advect using Arakawa scheme
-    qg_model=torch_model.QG_model(nx=nx)
-    advected=qg_model._advect(q,psi)
+    qg_model=torch_model.ArakawaModel(nx=nx)
+    advected=qg_model.advect(q,psi)
 
     assert advected.sum().abs() < 1e-10
 
@@ -32,10 +32,10 @@ def test_advection2():
     q=torch.stack((-torch.sin(xx),-torch.sin(xx)))
 
     ## Advect using Arakawa scheme
-    qg_model=torch_model.QG_model(nx=nx)
-    advected=qg_model._advect(q,psi)
+    qg_model=torch_model.ArakawaModel(nx=nx)
+    advected=qg_model.advect(q,psi)
 
     ## Ensure all values are exactly 0
     assert advected.sum()==0.
     
-
+    
