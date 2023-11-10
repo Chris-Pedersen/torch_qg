@@ -1,22 +1,10 @@
 import torch
 import math
+import numpy as np
 from tqdm import tqdm
 
-def clean_2h__(X):
-    '''
-    Remove frequencies which potentially
-    can harm reversibility of rfftn
-    '''
-    Xf = torch.fft.rfftn(X,dim=(1,2))
-    n = X.shape[0] // 2
-    Xf[n,0] = 0
-    Xf[:,n] = 0
-    return torch.fft.irfftn(Xf,dim=(1,2))
 
-def clean_2h(X):
-    return X
-
-class QG_model():
+class BaseQGModel():
     def __init__(
         self,
         nx=64,                      # number of gridpoints
@@ -67,11 +55,15 @@ class QG_model():
         self.nk = nx/2 + 1
         self.dt = dt
         self.parameterization = parameterization
+
+        ## Set previous timestep rhs to None at initialisation
+        self.rhs_minus_one=None
+        self.rhs_minus_two=None
         
-        self._initialise_q1q2()
         self._initialise_background()
         self._initialise_grid()
-        
+        self._initialise_q1q2()
+
     def _initialise_background(self):
         
         self.F1 = self.rd**-2 / (1.+self.delta)
@@ -114,7 +106,6 @@ class QG_model():
         self.kappa2=(self.l**2+self.k**2)
         self.kappa=torch.sqrt(self.kappa2)
         
-        
         ## Evaluate 2x2 matrix determinant for calculation of streamfunction
         self.determinant=self.kappa2*(self.kappa2+self.F1+self.F2)
         ## Set to false value so matrix inversion doesn't throw warnings
@@ -135,14 +126,49 @@ class QG_model():
         return
     
     def _initialise_q1q2(self):
-        self.q=torch.stack((1e-7*torch.rand(self.ny,self.nx) + 1e-6*(torch.ones((self.ny,1)) * torch.rand(1,self.nx) ),torch.zeros(self.nx,self.nx)))
+        """ Initialise potential vorticity using a randomly generated pattern to instigate baroclinic instability """
+
+        ## Should already be None, but just making sure in case this is called externally
+        self.rhs_minus_one=None
+        self.rhs_minus_two=None
+
+        self.q=torch.stack((1e-7*torch.rand(self.ny,self.nx,dtype=torch.float64) + 1e-6*(torch.ones((self.ny,1),dtype=torch.float64)
+                                    * torch.rand(1,self.nx,dtype=torch.float64) ),torch.zeros(self.nx,self.nx,dtype=torch.float64)))
+
+        ## Update other state variables
+        self.qh=torch.fft.rfftn(self.q,dim=(1,2))
+        self.psih=self.invert(self.qh)
+        self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
         
         return
-    
-    def _invert(self,qh):
+
+    def set_q1q2(self,q):
+        """ Set potential vorticity to some specific configuration. We make sure to remove any previous timesteps stored in
+            the rhs for the AB3 scheme. """
+
+        if type(q)==np.ndarray:
+            self.q=torch.tensor(q,dtype=torch.float64)
+        else:
+            ## Ensure we are float64 even if passing a torch tensor
+            self.q=q.type(torch.float64)
+
+        ## Remove cached RHS, so we start from Euler
+        self.rhs_minus_one=None
+        self.rhs_minus_two=None
+
+        ## Update other state variables
+        self.qh=torch.fft.rfftn(self.q,dim=(1,2))
+        self.psih=self.invert(self.qh)
+        self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
+        
+        ## Make sure we are float64
+        assert self.q.dtype==torch.float64, "Not float64"
+
+        return
+
+    def invert(self,qh):
         """ Invert 2x2 matrix equation to get streamfunction from potential vorticity.
             Also return fft of streamfunction for use in other calculations """
-        
         
         ph1=(-(self.kappa2+self.F2)*qh[0]-self.F1*qh[1])/self.determinant
         ph2=(-self.F2*qh[0]-(self.kappa2+self.F1)*qh[1])/self.determinant
@@ -152,47 +178,24 @@ class QG_model():
         ph2[0,0]=0
         
         return torch.stack((ph1,ph2))
-    
-    def calc_ispec(self,var_dens):
-        # account for complex conjugate
-        var_dens[...,0] /= 2
-        var_dens[...,-1] /= 2
 
-        ll_max = torch.abs(self.ll).max()
-        kk_max = torch.abs(self.kk).max()
-        kmax = torch.minimum(ll_max, kk_max)
+    def run_sim(self,steps):
+        """ Evolve system forward in time by some number of steps """
+        for aa in tqdm(range(steps)):
+            self._step_ab3()
 
-        kmin = 0
+        return
 
-        dkr = math.sqrt(self.dk**2 + self.dl**2)
+    def _step_ab3(self):
+        raise NotImplementedError("Implemented by subclass")
 
-        # left border of bins
-        kr = torch.arange(kmin, kmax, dkr)
 
-        phr = torch.zeros(kr.shape[0])
 
-        for i in range(kr.shape[0]):
-            if i == kr.shape[0]-1:
-                fkr = (self.kappa>=kr[i]) & (self.kappa<=kr[i]+dkr)
-            else:
-                fkr = (self.kappa>=kr[i]) & (self.kappa<kr[i+1])
-            phr[i] = var_dens[fkr].mean() * (kr[i]+dkr/2) * math.pi / (self.dk * self.dl)
-            phr[i] *= 2 # include full circle
+class ArakawaModel(BaseQGModel):
+    def __init__(self,*args,**kwargs):
+        #super(BaseQGModel,self).__init__(*args,**kwargs)
+        super().__init__(*args,**kwargs)
 
-        # convert left border of the bin to center
-        kr = kr + dkr/2
-
-        return kr, phr
-    
-    def get_KE_ispec(self,qh):
-        KEspec=(self.kappa2*torch.abs(qh)**2/self.M**2)
-        k,KEs_upper = self.calc_ispec(KEspec[0])
-        k,KEs_lower = self.calc_ispec(KEspec[1])
-        KEs_both=torch.vstack((KEs_upper,KEs_lower))
-        
-        return k,KEs_both
-        
-    
     @staticmethod
     def diffx(x,dx):
         """ Central difference approximation to the spatial derivative in x direction 
@@ -209,8 +212,9 @@ class QG_model():
 
         return (torch.roll(x,shifts=-1,dims=1)-torch.roll(x,shifts=1,dims=1))/(2*dx)
     
-    def _advect(self,q,psi):
-        """ Arakawa advection scheme of q """
+    def advect(self,q,psi):
+        """ Arakawa advection scheme of q. Returns Arakawa advection - but does not update
+            any state variables """
         
         f1 = self.diffx(psi,dx=self.dx)*self.diffy(q,self.dx) - self.diffy(psi,self.dx)*self.diffx(q,self.dx)
         f2 = self.diffy(self.diffx(psi,self.dx)*q,self.dx) - self.diffx(self.diffy(psi,self.dx)*q,self.dx)
@@ -218,25 +222,17 @@ class QG_model():
         
         f = - (f1 + f2 + f3) / 3
         return f
-        
-    def rhs(self,q,return_qh=False):
-        """ Build a tensor of dq/dt """
-        
-        ## FFT of potential vorticity
-        qh=torch.fft.rfftn(q,dim=(1,2))
-        
-        ## Invert coupling matrix to get streamfunction in Fourier domain
-        ph=self._invert(qh)
-        ## Invert fft to get streamfunction in real space
-        psi=torch.fft.irfftn(ph,dim=(1,2))
+
+    def rhs(self,q,qh,psi,psih):
+        """ Build a tensor of dq/dt. Does not update any state variables. """
         
         #### Spatial derivatives ####
         ## Spatial derivative of streamfunction using Fourier tensor
-        dpsi=torch.fft.irfftn(self.ik*ph,dim=(1,2))
-        d2psi=torch.fft.irfftn(-self.kappa2*ph,dim=(1,2))
+        dpsi=torch.fft.irfftn(self.ik*psih,dim=(1,2))
+        d2psi=torch.fft.irfftn(-self.kappa2*psih,dim=(1,2))
         dq=torch.fft.irfftn(self.ik*qh,dim=(1,2))
         
-        rhs=-1*self._advect(q,psi)
+        rhs=-1*self.advect(q,psi)
         rhs[0]+=(-self.betas[0]*dpsi[0])
         rhs[1]+=(-self.betas[1]*dpsi[1])
         
@@ -247,272 +243,68 @@ class QG_model():
         rhs[1]+=-self.rek*d2psi[1]
         
         if self.parameterization is not None:
-            rhs+=self.parameterization(q,ph,self.ik,self.il,self.dx)
-        
-        if return_qh:
-            return rhs, qh
-        else:
-            return rhs
-        
-    def timestep_euler(self,q):
-        """ Advance system forward in time one step using forward Euler """
-                
-        return q+self.rhs(q)*self.dt
-    
-    def run_ab(self,q,steps,store_snaps=False):
-        """ Advance system forward in time using AB3 """
-        rhs_n=None
-        rhs_n_minus_one=None
-        rhs_n_minus_two=None
-        snaps=None
-        KEs=None
-        
-        if store_snaps:
-            ## Initialise empty tensor to store q of shape
-            ## [step_index,layer number, nx, ny]
-            snaps=torch.empty((steps,2,self.nx,self.nx))
-            KEs=torch.empty((steps,2,len(self.kr)))
-        
-        for aa in tqdm(range(steps)):
-            ## If we have no n_{i-1} timestep, we just do forward Euler
-            if rhs_n_minus_one==None:
-                self.q=clean_2h(q+self.rhs(q)*self.dt)
-                ## Store rhs as rhs_{i-1}
-                rhs_n_minus_one, qh=self.rhs(q, True)
-            ## If we have no n_{i-2} timestep, we do AB2
-            elif rhs_n_minus_two==None:
-                rhs, qh=self.rhs(self.q, True)
-                self.q=clean_2h(self.q+(0.5*self.dt)*(3*rhs-rhs_n_minus_one))
-                ## Update previous timestep rhs
-                rhs_n_minus_two=rhs_n_minus_one
-                rhs_n_minus_one=rhs
-            else:
-                ## If we have two previous timesteps stored, use AB3
-                rhs,qh=self.rhs(self.q,True) ## Return qh to get 
-                self.q=clean_2h(self.q+(self.dt/12.)*(23*rhs-16*rhs_n_minus_one+5*rhs_n_minus_two))
-                ## Update previous timesteps
-                rhs_n_minus_two=rhs_n_minus_one
-                rhs_n_minus_one=rhs
-            if store_snaps:
-                snaps[aa]=self.q
-                self.kr,KEs[aa]=self.get_KE_ispec(qh)
-                
-            ## If we hit NaNs, stop the show
-            if torch.sum(torch.isnan(self.q))!=0:
-                print("NaNs in pv field, stopping sim")
-                break
-            
-        return [snaps,KEs]
-    
-    def run_sim(self,steps):
-        for aa in tqdm(range(steps)):
-            self.q=self.timestep_euler(self.q)
-            
-        return
-    
-    
-### WIP  - not functional yet
-import numpy as np
-class QG_model_spectral():
-    def __init__(
-        self,
-        nx=64,                      # number of gridpoints
-        dt=3600.,                   # numerical timestep
-        L=1e6,                      # domain size is L [m]
-        beta=1.5e-11,               # gradient of coriolis parameter
-        rek=5.787e-7,               # linear drag in lower layer
-        rd=15000.0,                 # deformation radius
-        delta=0.25,                 # layer thickness ratio (H1/H2)
-        H1 = 500,                   # depth of layer 1 (H1)
-        U1=0.025,                   # upper layer flow
-        U2=0.0,                     # lower layer flow
-        **kwargs
-        ):
-        """
-        Parameters
-        ----------
-
-        beta : number
-            Gradient of coriolis parameter. Units: meters :sup:`-1`
-            seconds :sup:`-1`
-        rek : number
-            Linear drag in lower layer. Units: seconds :sup:`-1`
-        rd : number
-            Deformation radius. Units: meters.
-        delta : number
-            Layer thickness ratio (H1/H2)
-        U1 : number
-            Upper layer flow. Units: meters seconds :sup:`-1`
-        U2 : number
-            Lower layer flow. Units: meters seconds :sup:`-1`
-        """
-
-        # physical
-        self.beta = beta
-        self.rek = rek
-        self.rd = rd
-        self.delta = delta
-        self.Hi = torch.tensor([ H1, H1/delta])
-        self.U1 = U1
-        self.U2 = U2
-        self.nx = nx
-        self.ny = nx
-        self.L = L
-        self.W = L
-        self.nl = nx
-        self.nk = nx/2 + 1
-        self.dt = dt
-        
-        # the F parameters
-        self.F1 = self.rd**-2 / (1.+self.delta)
-        self.F2 = self.delta*self.F1
-
-
-        # initial conditions: (PV anomalies)
-        self._initialise_q1q2()
-        self._initialise_grid()
-        
-    def _initialise_grid(self):
-        """ Set up real-space and spectral-space grids """
-        
-        self.x,self.y = torch.meshgrid(
-        torch.arange(0.5,self.nx,1.)/self.nx*self.L,
-        torch.arange(0.5,self.ny,1.)/self.ny*self.W )
-        ## physical grid spacing
-        self.dx = self.L / self.nx
-        self.dy = self.W / self.ny
-
-        # Notice: at xi=1 U=beta*rd^2 = c for xi>1 => U>c
-        # wavenumber one (equals to dkx/dky)
-        self.dk = 2.*math.pi/self.L
-        self.dl = 2.*math.pi/self.W
-
-        ## Define wavenumber arrays - nb that fft comes out
-        ## with positive frequencies, then negative frequencies,
-        ## and that rfft returns only half the plane
-        self.ll = self.dl*torch.cat((torch.arange(0.,self.nx/2),
-            torch.arange(-self.nx/2,0.)))
-        self.kk = self.dk*torch.arange(0.,self.nk)
-
-        ## Get wavenumber grids in complex plane
-        self.k, self.l = torch.meshgrid(self.kk, self.ll)
-        
-        ## Torch meshgrid produces arrays with opposite indices to numpy, so we take the transpose
-        self.k=self.k.T
-        self.l=self.l.T
-        self.ik = 1j*self.k
-        self.il = 1j*self.l
-        
-        ## kappa2 represents the wavenumber squared at each gridpoint
-        self.kappa2=(self.l**2+self.k**2)
-        
-        
-        ## Evaluate 2x2 matrix determinant for calculation of streamfunction
-        self.determinant=self.kappa2*(self.kappa2+self.F1+self.F2)
-        ## Set to false value so matrix inversion doesn't throw warnings
-        self.determinant[0,0]=1e-19
-        
-        return
-        
-    
-    def _initialise_q1q2(self):
-        self.q=torch.stack((1e-7*torch.rand(self.ny,self.nx) + 1e-6*(torch.ones((self.ny,1)) * torch.rand(1,self.nx) ),torch.zeros(self.nx,self.nx)))
-        return
-    
-    
-    def _advect(self,q,psi):
-        """Given real inputs q, u, v, returns the advective tendency for
-        q in spectral space."""
-        
-        u = self.u
-        v = self.v
-        
-        uq = u*q
-        vq = v*q
-        # this is a hack, since fft now requires input to have shape (nz,ny,nx)
-        # it does an extra unnecessary fft
-        is_2d = (uq.ndim==2)
-        if is_2d:
-            uq = np.tile(uq[np.newaxis,:,:], (self.nz,1,1))
-            vq = np.tile(vq[np.newaxis,:,:], (self.nz,1,1))
-        tend = self.ik*self.fft(uq) + self.il*self.fft(vq)
-        if is_2d:
-            return tend[0]
-        else:
-            return tend
-    
-    
-    def _invert(self,qh):
-        """ Invert 2x2 matrix equation to get streamfunction from potential vorticity.
-            Also return fft of streamfunction for use in other calculations """
-        
-        
-        ph1=(-(self.kappa2+self.F2)*qh[0]-self.F1*qh[1])/self.determinant
-        ph2=(-self.F2*qh[0]-(self.kappa2+self.F1)*qh[1])/self.determinant
-
-        ## Fundamental mode is 0
-        ph1[0,0]=0
-        ph2[0,0]=0
-        
-        return torch.stack((ph1,ph2))
-    
-    @staticmethod
-    def diffx(x,dx):
-        """ Central difference approximation to the spatial derivative in x direction 
-            nb that our indices are [layer,y coordinate, x coordinate] so we torch.roll in
-            dimension 2 for x derivative """
-
-        return (torch.roll(x,shifts=-1,dims=2)-torch.roll(x,shifts=1,dims=2))/(2*dx)
-
-    @staticmethod
-    def diffy(x,dx):
-        """ Central difference approximation to the spatial derivative in x direction 
-            nb that our indices are [layer,y coordinate, x coordinate] so we torch.roll in
-            dimension 1 for y derivative """
-
-        return (torch.roll(x,shifts=-1,dims=1)-torch.roll(x,shifts=1,dims=1))/(2*dx)
-    
-        
-    def rhs(self,q):
-        """ Build a tensor of dq/dt """
-        
-        ## FFT of potential vorticity
-        qh=torch.fft.rfftn(q,dim=(1,2))
-        ## Spatial derivative of q field
-        
-        ## Invert coupling matrix to get streamfunction in Fourier domain
-        ph=self._invert(qh)
-        ## Invert fft to get streamfunction in real space
-        psi=torch.fft.irfftn(ph,dim=(1,2))
-        
-        #### Spatial derivatives ####
-        ## Spatial derivative of streamfunction using Fourier tensor
-        dpsi=torch.fft.irfftn(1j*torch.sqrt(self.kappa2)*ph,dim=(1,2))
-        d2psi=torch.fft.irfftn(self.kappa2*ph,dim=(1,2))
-        dq=torch.fft.irfftn(1j*torch.sqrt(self.kappa2)*qh,dim=(1,2))
-        
-        ## Background quantities
-        beta_upper=self.beta-self.F1*(self.U1-self.U2)
-        beta_lower=self.beta+self.F2*(self.U1-self.U2)
-        
-        rhs=-1*self._advect(q,ph)
-        rhs[0]+=(-beta_upper*dpsi[0])
-        rhs[1]+=(-beta_lower*dpsi[1])
-        
-        rhs[0]+=-dq[0]*self.U1
-        rhs[1]+=-dq[1]*self.U2
-        
-        ## Bottom drag
-        rhs[1]+=-self.rek*d2psi[1]
+            rhs+=self.parameterization(q,psih,self.ik,self.il,self.dx)
         
         return rhs
+
+    def _step_ab3(self):
+        """ Step the system state forward by one timestep. NB we assume that all 4 state variables (q,qh,psi,psih)
+            are always on the same timestep. So we first use the rhs to update q_i to q_{i+1}, then use this to
+            update the remaining 3 quantities to time {i+1} """
+
+        ## First calculate ffts - updating class properties here
+        self.qh=torch.fft.rfftn(self.q,dim=(1,2))
+        self.psih=self.invert(self.qh)
+        self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
+
+        ## If we have no n_{i-1} timestep, we just do forward Euler
+        if self.rhs_minus_one==None:
+            rhs=self.rhs(self.q,self.qh,self.psi,self.psih)
+            self.q=self.q+rhs*self.dt
+            ## Store rhs as rhs_{i-1}
+            rhs_n_minus_one, qh=rhs
+
+        ## If we have no n_{i-2} timestep, we do AB2
+        elif self.rhs_minus_two==None:
+            rhs=self.rhs(self.q,self.qh,self.psi,self.psih)
+            self.q=self.q+(0.5*self.dt)*(3*rhs-rhs_n_minus_one)
+            ## Update previous timestep rhs
+            rhs_n_minus_two=rhs_n_minus_one
+            rhs_n_minus_one=rhs
+        else:
+            ## If we have two previous timesteps stored, use AB3
+            rhs=self.rhs(self.q,self.qh,self.psi,self.psih)
+            self.q=self.q+(self.dt/12.)*(23*rhs-16*rhs_n_minus_one+5*rhs_n_minus_two)
+            ## Update previous timesteps
+            rhs_n_minus_two=rhs_n_minus_one
+            rhs_n_minus_one=rhs
+
+        ## self.q is now self.q_{i+1}. Now update the fourier transform, and streamfunction
+        self.qh=torch.fft.rfftn(self.q,dim=(1,2))
+        self.psih=self.invert(self.qh)
+        self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
+
+
+
+class PseudoSpectralModel(BaseQGModel):
+    def __init__(self,*args,**kwargs):
+        #super(BaseQGModel,self).__init__(*args,**kwargs)
+        super().__init__(*args,**kwargs)
+    
+    def advect(self,q,psi):
+        """ Pseudo-spectra advection """
         
-    def timestep(self,q):
-        """ Advance system forward in time one step """
+        raise NotImplementedError("Not yet implemented")
+
+    def rhs(self,q,qh,psi,psih):
+        """ Build a tensor of dq/dt. Does not update any state variables. """
         
-        """ 1. Need a function for the RHS
-            2. Pass RHS to some numerical solver
-            
-        """
-                
-        return q+self.rhs(q)*self.dt
+        raise NotImplementedError("Not yet implemented")
+
+    def _step_ab3(self):
+        """ Step the system state forward by one timestep. NB we assume that all 4 state variables (q,qh,psi,psih)
+            are always on the same timestep. So we first use the rhs to update q_i to q_{i+1}, then use this to
+            update the remaining 3 quantities to time {i+1} """
+
+        raise NotImplementedError("Not yet implemented")
+
