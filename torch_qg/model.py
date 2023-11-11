@@ -168,7 +168,7 @@ class BaseQGModel():
 
     def invert(self,qh):
         """ Invert 2x2 matrix equation to get streamfunction from potential vorticity.
-            Also return fft of streamfunction for use in other calculations """
+            Takes q in spectral space, returns psi in spectral space """
         
         ph1=(-(self.kappa2+self.F2)*qh[0]-self.F1*qh[1])/self.determinant
         ph2=(-self.F2*qh[0]-(self.kappa2+self.F1)*qh[1])/self.determinant
@@ -230,7 +230,7 @@ class ArakawaModel(BaseQGModel):
         """ Arakawa advection scheme of q. Returns Arakawa advection - but does not update
             any state variables """
         
-        f1 = self.diffx(psi,dx=self.dx)*self.diffy(q,self.dx) - self.diffy(psi,self.dx)*self.diffx(q,self.dx)
+        f1 = self.diffx(psi,self.dx)*self.diffy(q,self.dx) - self.diffy(psi,self.dx)*self.diffx(q,self.dx)
         f2 = self.diffy(self.diffx(psi,self.dx)*q,self.dx) - self.diffx(self.diffy(psi,self.dx)*q,self.dx)
         f3 = self.diffx(self.diffy(q,self.dx)*psi,self.dx) - self.diffy(self.diffx(q,self.dx)*psi,self.dx)
         
@@ -279,11 +279,7 @@ class ArakawaModel(BaseQGModel):
             are always on the same timestep. So we first use the rhs to update q_i to q_{i+1}, then use this to
             update the remaining 3 quantities to time {i+1} """
 
-        ## First calculate ffts - updating class properties here
-        self.qh=torch.fft.rfftn(self.q,dim=(1,2))
-        self.psih=self.invert(self.qh)
-        self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
-
+        ## First update q -> q_{i+1}
         rhs=self.rhs(self.q,self.qh,self.psi,self.psih)
         ## If we have no n_{i-1} timestep, we just do forward Euler
         if self.rhs_minus_one==None:
@@ -305,7 +301,8 @@ class ArakawaModel(BaseQGModel):
 
         ## "clean" q
         self.q=self.clean(self.q)
-        ## self.q is now self.q_{i+1}. Now update the fourier transform, and streamfunction
+        ## self.q is now self.q_{i+1}. Now update the spectral quantities, and streamfunction
+        ## such that all state variables are on the same timestep
         self.qh=torch.fft.rfftn(self.q,dim=(1,2))
         self.psih=self.invert(self.qh)
         self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
@@ -315,39 +312,86 @@ class PseudoSpectralModel(BaseQGModel):
     def __init__(self,*args,**kwargs):
         #super(BaseQGModel,self).__init__(*args,**kwargs)
         super().__init__(*args,**kwargs)
-    
-    def advect(self,q,psi):
-        """ Pseudo-spectra advection """
-        
-        raise NotImplementedError("Not yet implemented")
+        self.filterfac=23.6
+        self._initialize_filter()
 
-        """Given real inputs q, u, v, returns the advective tendency for
-        q in spectral space."""
-        if u is None:
-            u = self.u
-        if v is None:
-            v = self.v
-        uq = u*q
-        vq = v*q
-        # this is a hack, since fft now requires input to have shape (nz,ny,nx)
-        # it does an extra unnecessary fft
-        is_2d = (uq.ndim==2)
-        if is_2d:
-            uq = np.tile(uq[np.newaxis,:,:], (self.nz,1,1))
-            vq = np.tile(vq[np.newaxis,:,:], (self.nz,1,1))
-        tend = self.ik*self.fft(uq) + self.il*self.fft(vq)
+    def _initialize_filter(self):
+        """Set up frictional filter."""
+        # this defines the spectral filter (following Arbic and Flierl, 2003)
+        cphi=0.65*math.pi
+        wvx=np.sqrt((self.k*self.dx)**2.+(self.l*self.dy)**2.)
+        filtr = np.exp(-self.filterfac*(wvx-cphi)**4.)
+        filtr[wvx<=cphi] = 1.
+        self.filtr = filtr
+
+        return
+    
+    def advect(self,q,psih):
+        """ Pseudo-spectral advection. Takes as input q in real, psi in
+            spectral space. Returns advection tendency in spectral space.
+            Does not update any state variables. """
+
+        ## Get u, v in spectral space
+        u=torch.fft.irfftn(-self.il*psih,dim=(1,2))
+        v=torch.fft.irfftn(self.ik*psih,dim=(1,2))
+
+        uq = u*q ## Real space quantities
+        vq = v*q ## Real space quantities
+        tend = self.ik*torch.fft.rfftn(uq,dim=(1,2)) + self.il*torch.fft.rfftn(vq,dim=(1,2))
 
         return tend
 
-    def rhs(self,q,qh,psi,psih):
-        """ Build a tensor of dq/dt. Does not update any state variables. """
+    def rhsh(self,q,qh,psi,psih):
+        """ Build a tensor of dq/dt in spectral space.
+            Does not update any state variables. """
+
+        ## Advection term
+        rhsh=-self.advect(self.q,self.psih)
+
+        ## Beta effect
+        rhsh[0]+=-self.ik*self.betas[0]*self.psih[0]
+        rhsh[1]+=-self.ik*self.betas[1]*self.psih[1]
         
-        raise NotImplementedError("Not yet implemented")
+        ## Mean flow
+        rhsh[0]+=-self.ik*self.U1*self.qh[0]
+        rhsh[1]+=-self.ik*self.U2*self.qh[1]
+
+        ## Bottom drag
+        rhsh[1]+=-self.rek*self.kappa2*psih[1]
+
+        return rhsh
 
     def _step_ab3(self):
         """ Step the system state forward by one timestep. NB we assume that all 4 state variables (q,qh,psi,psih)
             are always on the same timestep. So we first use the rhs to update q_i to q_{i+1}, then use this to
             update the remaining 3 quantities to time {i+1} """
 
-        raise NotImplementedError("Not yet implemented")
+        ## First update qh -> qh_{i+1}
+        rhsh=self.rhsh(self.q,self.qh,self.psi,self.psih)
+        ## Apply dissipative filter
+        rhsh[0]*=self.filtr
+        rhsh[1]*=self.filtr
+        ## If we have no n_{i-1} timestep, we just do forward Euler
+        if self.rhs_minus_one==None:
+            self.qh=self.qh+rhsh*self.dt
+            ## Store rhs as rhs_{i-1}
+            self.rhs_minus_one=rhsh
+        ## If we have no n_{i-2} timestep, we do AB2
+        elif self.rhs_minus_two==None:
+            self.qh=self.qh+(0.5*self.dt)*(3*rhsh-self.rhs_minus_one)
+            ## Update previous timestep rhs
+            self.rhs_minus_two=self.rhs_minus_one
+            self.rhs_minus_one=rhsh
+        else:
+            ## If we have two previous timesteps stored, use AB3
+            self.qh=self.qh+(self.dt/12.)*(23*rhsh-16*self.rhs_minus_one+5*self.rhs_minus_two)
+            ## Update previous timesteps
+            self.rhs_minus_two=self.rhs_minus_one
+            self.rhs_minus_one=rhsh
+
+        ## Now we have qh_{i+1}, update 3 remaining states
+        self.q=torch.fft.irfftn(self.qh,dim=(1,2))
+        self.psih=self.invert(self.qh)
+        self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
+
 
