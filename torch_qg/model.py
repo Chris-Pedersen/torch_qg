@@ -261,6 +261,19 @@ class ArakawaModel(BaseQGModel):
         
         return rhs
 
+    def clean(self,q):
+        """
+        Remove frequencies which potentially
+        can harm reversibility of rfftn
+        """
+        Xf = torch.fft.rfftn(q,dim=(1,2))
+        n = q[1].shape[0] // 2
+        Xf[0,n,0] = 0
+        Xf[0,:,n] = 0
+        Xf[1,n,0] = 0
+        Xf[1,:,n] = 0
+        return torch.fft.irfftn(Xf,dim=(1,2))
+
     def _step_ab3(self):
         """ Step the system state forward by one timestep. NB we assume that all 4 state variables (q,qh,psi,psih)
             are always on the same timestep. So we first use the rhs to update q_i to q_{i+1}, then use this to
@@ -271,28 +284,27 @@ class ArakawaModel(BaseQGModel):
         self.psih=self.invert(self.qh)
         self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
 
+        rhs=self.rhs(self.q,self.qh,self.psi,self.psih)
         ## If we have no n_{i-1} timestep, we just do forward Euler
         if self.rhs_minus_one==None:
-            rhs=self.rhs(self.q,self.qh,self.psi,self.psih)
             self.q=self.q+rhs*self.dt
             ## Store rhs as rhs_{i-1}
-            rhs_n_minus_one, qh=rhs
-
+            self.rhs_minus_one=rhs
         ## If we have no n_{i-2} timestep, we do AB2
         elif self.rhs_minus_two==None:
-            rhs=self.rhs(self.q,self.qh,self.psi,self.psih)
-            self.q=self.q+(0.5*self.dt)*(3*rhs-rhs_n_minus_one)
+            self.q=self.q+(0.5*self.dt)*(3*rhs-self.rhs_minus_one)
             ## Update previous timestep rhs
-            rhs_n_minus_two=rhs_n_minus_one
-            rhs_n_minus_one=rhs
+            self.rhs_minus_two=self.rhs_minus_one
+            self.rhs_minus_one=rhs
         else:
             ## If we have two previous timesteps stored, use AB3
-            rhs=self.rhs(self.q,self.qh,self.psi,self.psih)
-            self.q=self.q+(self.dt/12.)*(23*rhs-16*rhs_n_minus_one+5*rhs_n_minus_two)
+            self.q=self.q+(self.dt/12.)*(23*rhs-16*self.rhs_minus_one+5*self.rhs_minus_two)
             ## Update previous timesteps
-            rhs_n_minus_two=rhs_n_minus_one
-            rhs_n_minus_one=rhs
+            self.rhs_minus_two=self.rhs_minus_one
+            self.rhs_minus_one=rhs
 
+        ## "clean" q
+        self.q=self.clean(self.q)
         ## self.q is now self.q_{i+1}. Now update the fourier transform, and streamfunction
         self.qh=torch.fft.rfftn(self.q,dim=(1,2))
         self.psih=self.invert(self.qh)
