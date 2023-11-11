@@ -46,7 +46,7 @@ class SimAnimation():
         # saving to m4 using ffmpeg writer 
         writervideo = animation.FFMpegWriter(fps=60)
         if self.save_string:
-            anim.save('%s.mp4' % save_string, writer=writervideo) 
+            anim.save('%s.mp4' % self.save_string, writer=writervideo) 
         plt.close()
         
         return HTML(anim.to_html5_video())
