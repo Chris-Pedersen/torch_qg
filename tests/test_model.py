@@ -1,6 +1,7 @@
 import pytest
 import torch
 import torch_qg.model as torch_model
+import torch_qg.parameterizations as torch_param
 
 def test_advection1():
     """ Ensure that the advected field produces a field with zero integrated vorticity """
@@ -11,8 +12,8 @@ def test_advection1():
     q=torch.stack((torch.rand(nx,nx,dtype=torch.float64),torch.rand(nx,nx,dtype=torch.float64)))
 
     ## Advect using Arakawa scheme
-    qg_model=torch_model.QG_model(nx=nx)
-    advected=qg_model._advect(q,psi)
+    qg_model=torch_model.ArakawaModel(nx=nx)
+    advected=qg_model.advect(q,psi)
 
     assert advected.sum().abs() < 1e-10
 
@@ -32,10 +33,23 @@ def test_advection2():
     q=torch.stack((-torch.sin(xx),-torch.sin(xx)))
 
     ## Advect using Arakawa scheme
-    qg_model=torch_model.QG_model(nx=nx)
-    advected=qg_model._advect(q,psi)
+    qg_model=torch_model.ArakawaModel(nx=nx)
+    advected=qg_model.advect(q,psi)
 
     ## Ensure all values are exactly 0
     assert advected.sum()==0.
     
+def test_sim_Arakawa():
+    for nx in ([32,64,128,256]):
+        qg_model=torch_model.ArakawaModel(nx=nx)
+        qg_model.run_sim(1000)
 
+def test_sim_param_Arakawa():
+    for nx in ([32,64,128,256]):
+        qg_model=torch_model.ArakawaModel(nx=nx,parameterization=torch_param.Smagorinsky())
+        qg_model.run_sim(1000)
+
+def test_sim_PseudoSpectral():
+    for nx in ([32,64,128,256]):
+        qg_model=torch_model.PseudoSpectralModel(nx=nx)
+        qg_model.run_sim(1000)
