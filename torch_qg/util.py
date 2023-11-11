@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation:q
+import matplotlib.animation as animation
 from IPython.display import HTML
 import cmocean
 
@@ -8,7 +8,7 @@ class SimAnimation():
         self.q=q_tensor
         self.fps = fps
         self.nSteps = nSteps
-        self.save_string
+        self.save_string = save_string
     
     def animate_func(self,i):
         if i % self.fps == 0:
