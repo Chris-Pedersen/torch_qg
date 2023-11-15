@@ -69,6 +69,11 @@ class BaseQGModel():
         self.F1 = self.rd**-2 / (1.+self.delta)
         self.F2 = self.delta*self.F1
         self.betas=torch.tensor([self.beta-self.F1*(self.U1-self.U2),self.beta+self.F1*(self.U1-self.U2)])
+
+        ## Set up tensor for background velocities
+        self.u_mean=torch.ones((2,self.nx,self.ny))
+        self.u_mean[0]*=self.U1
+        self.u_mean[1]*=self.U2
         
     def _initialise_grid(self):
         """ Set up real-space and spectral-space grids """
@@ -326,18 +331,22 @@ class PseudoSpectralModel(BaseQGModel):
 
         return
     
-    def advect(self,q,psih):
+    def advect(self,q,psih,u_mean=None):
         """ Pseudo-spectral advection. Takes as input q in real, psi in
             spectral space. Returns advection tendency in spectral space.
             Does not update any state variables. """
+
+        ## If no background velocities is provided, just set it to 0
+        if u_mean is None:
+            u_mean=torch.zeros(q.shape)
 
         ## Get u, v in spectral space
         u=torch.fft.irfftn(-self.il*psih,dim=(1,2))
         v=torch.fft.irfftn(self.ik*psih,dim=(1,2))
 
-        uq = u*q ## Real space quantities
+        uq = (u+u_mean)*q ## Real space quantities
         vq = v*q ## Real space quantities
-        tend = self.ik*torch.fft.rfftn(uq,dim=(1,2)) + self.il*torch.fft.rfftn(vq,dim=(1,2))
+        tend = -self.ik*torch.fft.rfftn(uq,dim=(1,2)) - self.il*torch.fft.rfftn(vq,dim=(1,2))
 
         return tend
 
@@ -346,7 +355,7 @@ class PseudoSpectralModel(BaseQGModel):
             Does not update any state variables. """
 
         ## Advection term
-        rhsh=-self.advect(self.q,self.psih)
+        rhsh=-self.advect(self.q,self.psih,self.u_mean)
 
         ## Beta effect
         rhsh[0]+=-self.ik*self.betas[0]*self.psih[0]
@@ -357,7 +366,7 @@ class PseudoSpectralModel(BaseQGModel):
         rhsh[1]+=-self.ik*self.U2*self.qh[1]
 
         ## Bottom drag
-        rhsh[1]+=-self.rek*self.kappa2*psih[1]
+        rhsh[1]+=self.rek*self.kappa2*psih[1]
 
         return rhsh
 
@@ -368,9 +377,6 @@ class PseudoSpectralModel(BaseQGModel):
 
         ## First update qh -> qh_{i+1}
         rhsh=self.rhsh(self.q,self.qh,self.psi,self.psih)
-        ## Apply dissipative filter
-        rhsh[0]*=self.filtr
-        rhsh[1]*=self.filtr
         ## If we have no n_{i-1} timestep, we just do forward Euler
         if self.rhs_minus_one==None:
             self.qh=self.qh+rhsh*self.dt
@@ -388,6 +394,10 @@ class PseudoSpectralModel(BaseQGModel):
             ## Update previous timesteps
             self.rhs_minus_two=self.rhs_minus_one
             self.rhs_minus_one=rhsh
+
+        ## Apply dissipative filter
+        self.qh[0]=self.filtr*self.qh[0]
+        self.qh[1]=self.filtr*self.qh[1]
 
         ## Now we have qh_{i+1}, update 3 remaining states
         self.q=torch.fft.irfftn(self.qh,dim=(1,2))
