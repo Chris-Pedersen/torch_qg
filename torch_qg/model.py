@@ -59,7 +59,10 @@ class BaseQGModel():
         ## Set previous timestep rhs to None at initialisation
         self.rhs_minus_one=None
         self.rhs_minus_two=None
-        
+
+        ## Counter to record simulation timesteps
+        self.timestep=0
+
         self._initialise_background()
         self._initialise_grid()
         self._initialise_q1q2()
@@ -69,6 +72,11 @@ class BaseQGModel():
         self.F1 = self.rd**-2 / (1.+self.delta)
         self.F2 = self.delta*self.F1
         self.betas=torch.tensor([self.beta+self.F1*(self.U1-self.U2),self.beta-self.F2*(self.U1-self.U2)])
+
+        ## Set up tensor for background velocities
+        self.u_mean=torch.ones((2,self.nx,self.ny))
+        self.u_mean[0]*=self.U1
+        self.u_mean[1]*=self.U2
         
     def _initialise_grid(self):
         """ Set up real-space and spectral-space grids """
@@ -139,8 +147,19 @@ class BaseQGModel():
         self.qh=torch.fft.rfftn(self.q,dim=(1,2))
         self.psih=self.invert(self.qh)
         self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
+        self.timestep=0 ## Reset timestep counter
         
         return
+
+    def calc_cfl(self):
+        """ Calculate CFL for the current state of the system """
+
+        ## Get u, v in spectral space, then ifft to real space
+        u=torch.fft.irfftn(-self.il*self.psih,dim=(1,2))+self.u_mean
+        v=torch.fft.irfftn(self.ik*self.psih,dim=(1,2))
+
+        ## Stack u and v velocities, compare to gridstep and grid sizes
+        return torch.abs(torch.stack((u,v))).max()*self.dt/self.dx
 
     def set_q1q2(self,q):
         """ Set potential vorticity to some specific configuration. We make sure to remove any previous timesteps stored in
@@ -192,6 +211,10 @@ class BaseQGModel():
             if store==True:
                 store_snaps[aa]=self.q
             self._step_ab3()
+            ## Check CFL every 1k timesteps
+            if self.timestep % 1000==0:
+                cfl=self.calc_cfl()
+                assert cfl<1., "CFL condition violated"
 
             ## If we hit NaNs, stop the show
             if torch.sum(torch.isnan(self.q))!=0:
@@ -305,6 +328,9 @@ class ArakawaModel(BaseQGModel):
         self.qh=torch.fft.rfftn(self.q,dim=(1,2))
         self.psih=self.invert(self.qh)
         self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
+        self.timestep+=1
+
+        return
 
 
 class PseudoSpectralModel(BaseQGModel):
@@ -331,7 +357,7 @@ class PseudoSpectralModel(BaseQGModel):
             Does not update any state variables. """
 
 
-        ## Get u, v in spectral space
+        ## Get u, v in spectral space, then ifft to real space
         u=torch.fft.irfftn(-self.il*psih,dim=(1,2))
         v=torch.fft.irfftn(self.ik*psih,dim=(1,2))
 
@@ -394,5 +420,8 @@ class PseudoSpectralModel(BaseQGModel):
         self.q=torch.fft.irfftn(self.qh,dim=(1,2))
         self.psih=self.invert(self.qh)
         self.psi=torch.fft.irfftn(self.psih,dim=(1,2))
+        self.timestep+=1
+
+        return
 
 
