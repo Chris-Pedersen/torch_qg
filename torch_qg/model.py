@@ -68,7 +68,7 @@ class BaseQGModel():
         
         self.F1 = self.rd**-2 / (1.+self.delta)
         self.F2 = self.delta*self.F1
-        self.betas=torch.tensor([self.beta-self.F1*(self.U1-self.U2),self.beta+self.F1*(self.U1-self.U2)])
+        self.betas=torch.tensor([self.beta+self.F1*(self.U1-self.U2),self.beta-self.F2*(self.U1-self.U2)])
 
         ## Set up tensor for background velocities
         self.u_mean=torch.ones((2,self.nx,self.ny))
@@ -209,7 +209,6 @@ class BaseQGModel():
         raise NotImplementedError("Implemented by subclass")
 
 
-
 class ArakawaModel(BaseQGModel):
     def __init__(self,*args,**kwargs):
         #super(BaseQGModel,self).__init__(*args,**kwargs)
@@ -341,29 +340,29 @@ class PseudoSpectralModel(BaseQGModel):
             u_mean=torch.zeros(q.shape)
 
         ## Get u, v in spectral space
-        u=torch.fft.irfftn(-self.il*psih,dim=(1,2))
+        u=torch.fft.irfftn(-self.il*psih,dim=(1,2))+u_mean
         v=torch.fft.irfftn(self.ik*psih,dim=(1,2))
 
-        uq = (u+u_mean)*q ## Real space quantities
+        uq = u*q ## Real space quantities
         vq = v*q ## Real space quantities
         tend = -self.ik*torch.fft.rfftn(uq,dim=(1,2)) - self.il*torch.fft.rfftn(vq,dim=(1,2))
 
         return tend
 
-    def rhsh(self,q,qh,psi,psih):
+    def rhsh(self,q,qh,psi,psih,u_mean):
         """ Build a tensor of dq/dt in spectral space.
             Does not update any state variables. """
 
         ## Advection term
-        rhsh=-self.advect(self.q,self.psih,self.u_mean)
+        rhsh=-self.advect(q,psih,u_mean)
 
         ## Beta effect
-        rhsh[0]+=-self.ik*self.betas[0]*self.psih[0]
-        rhsh[1]+=-self.ik*self.betas[1]*self.psih[1]
+        rhsh[0]+=-self.ik*self.betas[0]*psih[0]
+        rhsh[1]+=-self.ik*self.betas[1]*psih[1]
         
         ## Mean flow
-        rhsh[0]+=-self.ik*self.U1*self.qh[0]
-        rhsh[1]+=-self.ik*self.U2*self.qh[1]
+        #rhsh[0]+=-self.ik*self.U1*qh[0]
+        #rhsh[1]+=-self.ik*self.U2*qh[1]
 
         ## Bottom drag
         rhsh[1]+=self.rek*self.kappa2*psih[1]
@@ -376,7 +375,7 @@ class PseudoSpectralModel(BaseQGModel):
             update the remaining 3 quantities to time {i+1} """
 
         ## First update qh -> qh_{i+1}
-        rhsh=self.rhsh(self.q,self.qh,self.psi,self.psih)
+        rhsh=self.rhsh(self.q,self.qh,self.psi,self.psih,self.u_mean)
         ## If we have no n_{i-1} timestep, we just do forward Euler
         if self.rhs_minus_one==None:
             self.qh=self.qh+rhsh*self.dt
