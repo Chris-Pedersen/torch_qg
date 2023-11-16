@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from IPython.display import HTML
 import cmocean
+import numpy as np
 
 class SimAnimation():
     def __init__(self,q_tensor,fps=10,nSteps=1000,save_string=None):
@@ -15,13 +16,13 @@ class SimAnimation():
             print( '.', end ='' )
     
         ## Set image and colorbar for each panel
-        image=self.q[i,0]
+        image=self.q[i,0].numpy()
         self.ax1.set_array(image)
-        #self.ax1.set_clim(-np.max(np.abs(image)), np.max(np.abs(image)))
+        self.ax1.set_clim(-np.max(np.abs(image)), np.max(np.abs(image)))
         
-        image=self.q[i,1]
+        image=self.q[i,1].numpy()
         self.ax2.set_array(image)
-        #self.ax2.set_clim(-np.max(np.abs(image)), np.max(np.abs(image)))
+        self.ax2.set_clim(-np.max(np.abs(image)), np.max(np.abs(image)))
         
         return 
     
