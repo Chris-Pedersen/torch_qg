@@ -152,6 +152,4 @@ class Diagnostics():
             """ Convert current state variables to xarray dataset. Include
                 spectral quantities """
 
-            
-
-            return ds
+            return 
