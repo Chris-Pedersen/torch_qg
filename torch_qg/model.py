@@ -3,6 +3,8 @@ import math
 import numpy as np
 from tqdm import tqdm
 
+import torch_qg.diagnostics as diagnostics
+
 
 class BaseQGModel():
     def __init__(
@@ -227,7 +229,7 @@ class BaseQGModel():
         raise NotImplementedError("Implemented by subclass")
 
 
-class ArakawaModel(BaseQGModel):
+class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
     def __init__(self,*args,**kwargs):
         #super(BaseQGModel,self).__init__(*args,**kwargs)
         super().__init__(*args,**kwargs)
