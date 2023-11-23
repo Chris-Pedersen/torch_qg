@@ -91,7 +91,7 @@ class Diagnostics():
         """ Add diagnostics of current system state to the self.diagnostics list """
 
         ## First update derived quantities
-        self._calc_derived_fields
+        self._calc_derived_fields()
 
         self.diagnostics["KEspec"].append(self.get_KE_ispec())
         self.diagnostics["SPE"].append(self.get_spectral_energy_transfer())
