@@ -136,7 +136,7 @@ class BaseQGModel():
 
         kmax = np.minimum(ll_max, kk_max)
         self.dkr = np.sqrt(self.dk**2 + self.dl**2)
-        self.k1d=np.arange(0, kmax, self.dkr)
+        self.k1d=np.arange(0, kmax, self.dkr)+self.dkr/2
         
         return
     
