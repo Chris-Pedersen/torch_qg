@@ -75,16 +75,6 @@ attribute_database = [
 class Diagnostics():
     """ Include everything related to spectral diagnostics in this class """
 
-    def _initialise_diagnostics(self):
-        """ Set up dict of lists to store diagnostic quantities.
-            Will overwrite diagnostics if called manually """
-
-        ## Diagnostics are kinetic energy spectrum, spectral energy transfer, enstrophy spectrum
-        self.diagnostics={"KEspec":[],
-                    "SPE":[],
-                    "Ensspec":[]}
-        return
-
     def _increment_diagnostics(self):
         """ Add diagnostics of current system state to the self.diagnostics list """
 
@@ -141,7 +131,7 @@ class Diagnostics():
         """ For an input [nx,ny] field, calculate the isotropically averaged spectra """
 
         ## Array to output isotropically averaged wavenumbers
-        phr = np.zeros((self.kr.size()[0]))
+        phr = np.zeros((self.k1d.size))
         ispec=copy.copy(field)
 
         ## Account for complex conjugate
@@ -149,12 +139,12 @@ class Diagnostics():
         ispec[:,-1] /= 2
 
         ## Loop over wavenumbers. Average all modes within a given |k| range
-        for i in range(self.kr.size()[0]):
-            if i == self.kr.size()[0]-1:
+        for i in range(self.k1d.size):
+            if i == self.k1d.size-1:
                 fkr = (self.kappa>=self.k1d[i]) & (self.kappa<=self.k1d[i]+self.dkr)
             else:
                 fkr = (self.kappa>=self.k1d[i]) & (self.kappa<self.k1d[i+1])
-            phr[i] = ispec[fkr].mean(axis=-1) * (self.kr[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
+            phr[i] = ispec[fkr].mean(axis=-1) * (self.k1d[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
 
             phr[i] *= 2 # include full circle
 
@@ -164,7 +154,7 @@ class Diagnostics():
         """ For an input [2,nx,ny] field, calculate the isotropically averaged spectra """
 
         ## Array to output isotropically averaged wavenumbers
-        phr = np.zeros((2,self.kr.size()[0]))
+        phr = np.zeros((2,self.k1d.size))
         ispec=copy.copy(field)
 
         ## Account for complex conjugate
@@ -172,12 +162,12 @@ class Diagnostics():
         ispec[:,:,-1] /= 2
 
         ## Loop over wavenumbers. Average all modes within a given |k| range
-        for i in range(self.kr.size()[0]):
-            if i == self.kr.size()[0]-1:
+        for i in range(self.k1d.size):
+            if i == self.k1d.size-1:
                 fkr = (self.kappa>=self.k1d[i]) & (self.kappa<=self.k1d[i]+self.dkr)
             else:
                 fkr = (self.kappa>=self.k1d[i]) & (self.kappa<self.k1d[i+1])
-            phr[:,i] = ispec[:,fkr].mean(axis=-1) * (self.kr[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
+            phr[:,i] = ispec[:,fkr].mean(axis=-1) * (self.k1d[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
 
             phr[:,i] *= 2 # include full circle
 
