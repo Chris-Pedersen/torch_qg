@@ -20,6 +20,8 @@ class BaseQGModel():
         U1=0.025,                   # upper layer flow
         U2=0.0,                     # lower layer flow
         parameterization=None,      # parameterization
+        diagnostics_start=4e4,      # Number of timesteps after which to start sampling diagnostics
+        diagnostics_freq=25,        # Frequency at which to sample diagnostics
         **kwargs
         ):
         """
@@ -57,6 +59,10 @@ class BaseQGModel():
         self.nk = nx/2 + 1
         self.dt = dt
         self.parameterization = parameterization
+
+        ## Diagnostics config
+        self.diagnostics_start=diagnostics_start
+        self.diagnostics_freq=diagnostics_freq
 
         ## Set previous timestep rhs to None at initialisation
         self.rhs_minus_one=None
@@ -137,6 +143,11 @@ class BaseQGModel():
         kmax = np.minimum(ll_max, kk_max)
         self.dkr = np.sqrt(self.dk**2 + self.dl**2)
         self.k1d=np.arange(0, kmax, self.dkr)+self.dkr/2
+
+        ## Diagnostics are kinetic energy spectrum, spectral energy transfer, enstrophy spectrum
+        self.diagnostics={"KEspec":[],
+                    "SPE":[],
+                    "Ensspec":[]}
         
         return
     
@@ -343,6 +354,10 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
         self.p=torch.fft.irfftn(self.ph,dim=(1,2))
         self.timestep+=1
 
+        ## Increment diagnostics
+        if self.timestep>self.diagnostics_start and (self.timestep % self.diagnostics_freq ==0):
+            self._increment_diagnostics()
+
         return
 
 
@@ -433,6 +448,10 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
         self.p=torch.fft.irfftn(self.ph,dim=(1,2))
         ## Update timestep
         self.timestep+=1
+
+        ## Increment diagnostics
+        if self.timestep>self.diagnostics_start and (self.timestep % self.diagnostics_freq ==0):
+            self._increment_diagnostics()
 
         return
 
