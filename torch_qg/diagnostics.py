@@ -74,6 +74,7 @@ attribute_database = [
 
 class Diagnostics():
     """ Include everything related to spectral diagnostics in this class """
+
     def _spectral_grid(self):
         """ Set up ispec grid """
 
@@ -87,6 +88,9 @@ class Diagnostics():
         return
 
     def _calc_derived_fields(self):
+        """ Taken from pyqg - compupte various quantities that are used
+            for diagnostics. These are stored as self objects """
+
         self.xi=torch.fft.irfftn(-self.kappa2*self.ph,dim=(1,2))
         self.Jptpc = -self._advection(
                     (self.p[0] - self.p[1]),
@@ -96,6 +100,8 @@ class Diagnostics():
         self.Jpxi = self._advection(self.xi, self.u, self.v)
 
         self.Jq = self._advection(self.q, self.u, self.v)
+
+        return
 
     ## This is not used in the forward model, but used to calculate diagnostic
     ## quantities. Just copying the pyqg code for this for now..
@@ -123,18 +129,16 @@ class Diagnostics():
         else:
             return tend
 
+    def get_ispec_1(self,field):
+        """ For an input [nx,ny] field, calculate the isotropically averaged spectra """
 
-    def get_KE_ispec(self):
-        """ From current state variables, calculate isotropically averaged KE spectra
-            Do this for both upper and lower layers at once """
-
-        phr = np.zeros((2,self.kr.size()[0]))
-        KEspec=(self.kappa2*np.abs(self.ph)**2/self.M**2)
-        kespec=copy.copy(KEspec)
+        ## Array to output isotropically averaged wavenumbers
+        phr = np.zeros((self.kr.size()[0]))
+        ispec=copy.copy(field)
 
         ## Account for complex conjugate
-        kespec[:,:,0] /= 2
-        kespec[:,:,-1] /= 2
+        ispec[:,0] /= 2
+        ispec[:,-1] /= 2
 
         ## Loop over wavenumbers. Average all modes within a given |k| range
         for i in range(self.kr.size()[0]):
@@ -142,14 +146,69 @@ class Diagnostics():
                 fkr = (self.kappa>=self.k1d[i]) & (self.kappa<=self.k1d[i]+self.dkr)
             else:
                 fkr = (self.kappa>=self.k1d[i]) & (self.kappa<self.k1d[i+1])
-            phr[:,i] = kespec[:,fkr].mean(axis=-1) * (self.kr[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
+            phr[i] = ispec[fkr].mean(axis=-1) * (self.kr[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
+
+            phr[i] *= 2 # include full circle
+
+        return phr
+
+    def get_ispec_2(self,field):
+        """ For an input [2,nx,ny] field, calculate the isotropically averaged spectra """
+
+        ## Array to output isotropically averaged wavenumbers
+        phr = np.zeros((2,self.kr.size()[0]))
+        ispec=copy.copy(field)
+
+        ## Account for complex conjugate
+        ispec[:,:,0] /= 2
+        ispec[:,:,-1] /= 2
+
+        ## Loop over wavenumbers. Average all modes within a given |k| range
+        for i in range(self.kr.size()[0]):
+            if i == self.kr.size()[0]-1:
+                fkr = (self.kappa>=self.k1d[i]) & (self.kappa<=self.k1d[i]+self.dkr)
+            else:
+                fkr = (self.kappa>=self.k1d[i]) & (self.kappa<self.k1d[i+1])
+            phr[:,i] = ispec[:,fkr].mean(axis=-1) * (self.kr[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
 
             phr[:,i] *= 2 # include full circle
 
         return phr
 
-        def to_dataset(self):
-            """ Convert current state variables to xarray dataset. Include
-                spectral quantities """
+    def get_KE_ispec(self):
+        """ From current state variables, calculate isotropically averaged KE spectra
+            Do this for both upper and lower layers at once """
 
-            return 
+        #KEspec=(self.kappa2*np.abs(self.ph)**2/self.M**2)
+        return self.get_ispec_2(self.kappa2*np.abs(self.ph)**2/self.M**2)
+
+    def get_spectral_energy_transfer(self):
+        """ Return spectral energy transfer """
+
+        kef=((np.real(self.del1*self.ph[0]*np.conj(self.Jpxi[0])) + np.real(self.del2*self.ph[1]*np.conj(self.Jpxi[1])))/self.M**2)
+        ape=(self.rd**-2*self.del1*self.del2*np.real((self.ph[0]-self.ph[1])*np.conj(self.Jptpc))/self.M**2)
+
+        return self.get_ispec_1(ape+kef)
+
+    def get_enstrophy_ispec(self):
+        """ Get enstrophy spectrum """
+
+        return self.get_ispec_2(np.abs(self.qh)**2/self.M**2)
+
+    def to_dataset(self):
+        """ Convert current state variables to xarray dataset. Include
+            spectral quantities """
+
+
+        """ TODO: What spectral quantities do we want to store?
+            1. KE spectrum
+            2. Enstrophy spectrum
+            3. Spectral energy transfer
+
+        
+
+        """
+
+        raise NotImplementedError
+
+        return 

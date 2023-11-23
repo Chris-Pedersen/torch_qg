@@ -70,12 +70,14 @@ class BaseQGModel():
         self._initialise_q1q2()
 
     def _initialise_background(self):
+        """ Calculate various quantities relevant to model background """
         
         self.F1 = self.rd**-2 / (1.+self.delta)
         self.F2 = self.delta*self.F1
+        self.H = self.Hi.sum()
         self.betas=torch.tensor([self.beta+self.F1*(self.U1-self.U2),self.beta-self.F2*(self.U1-self.U2)])
 
-        ## Set up tensor for background velocities
+        ## Set up tensor for background velocities, used in rhs calculations
         self.u_mean=torch.ones((2,self.nx,self.ny))
         self.u_mean[0]*=self.U1
         self.u_mean[1]*=self.U2
