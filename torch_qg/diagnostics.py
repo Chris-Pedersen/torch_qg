@@ -76,11 +76,9 @@ class Diagnostics():
     """ Include everything related to spectral diagnostics in this class """
 
     def _initialise_diagnostics(self):
-        """ Set up arrays to store diagnostic quantities. Will also call
-            self._spectral_grid to initialise isotropically averaged wavenumbers.
-            Will also overwrite diagnostics if called manually """
+        """ Set up dict of lists to store diagnostic quantities.
+            Will overwrite diagnostics if called manually """
 
-        self._spectral_grid()
         ## Diagnostics are kinetic energy spectrum, spectral energy transfer, enstrophy spectrum
         self.diagnostics={"KEspec":[],
                     "SPE":[],
@@ -96,18 +94,6 @@ class Diagnostics():
         self.diagnostics["KEspec"].append(self.get_KE_ispec())
         self.diagnostics["SPE"].append(self.get_spectral_energy_transfer())
         self.diagnostics["Ensspec"].append(self.get_enstrophy_ispec())
-
-    def _spectral_grid(self):
-        """ Set up ispec grid """
-
-        ll_max = np.abs(self.ll).max()
-        kk_max = np.abs(self.kk).max()
-
-        kmax = np.minimum(ll_max, kk_max)
-        self.dkr = np.sqrt(self.dk**2 + self.dl**2)
-        self.k1d=np.arange(0, kmax, self.dkr)
-
-        return
 
     def _calc_derived_fields(self):
         """ Taken from pyqg - compupte various quantities that are used

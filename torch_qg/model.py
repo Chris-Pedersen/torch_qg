@@ -128,16 +128,15 @@ class BaseQGModel():
         self.determinant[0,0]=1e-19
         
         
-        ## spectral grid for isoptrically averaged spectra
-        ll_max = torch.abs(self.ll).max()
-        kk_max = torch.abs(self.kk).max()
-        kmax = torch.minimum(ll_max, kk_max)
-        kmin = 0
-        dkr = math.sqrt(self.dk**2 + self.dl**2)
-        # left border of bins
-        kr = torch.arange(kmin, kmax, dkr)
-        # convert left border of the bin to center
-        self.kr = kr + dkr/2
+        ## spectral grid for isoptrically averaged spectra (in numpy for now)
+        ## as this quantity will be output into xarray, and not included in
+        ## any backprop
+        ll_max = np.abs(self.ll).max()
+        kk_max = np.abs(self.kk).max()
+
+        kmax = np.minimum(ll_max, kk_max)
+        self.dkr = np.sqrt(self.dk**2 + self.dl**2)
+        self.k1d=np.arange(0, kmax, self.dkr)
         
         return
     
