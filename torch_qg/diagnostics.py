@@ -224,11 +224,11 @@ class Diagnostics():
         ## Do this by first creating a tensor of shape
         ## [n_layers,number of wavenumber bins,number of saved states]
         ## to store all saved values
-        diag_tensor=np.empty(torchqg.diagnostics[diag][0].shape+tuple([len(torchqg.diagnostics[diag])]))
+        diag_tensor=np.empty(self.diagnostics[diag][0].shape+tuple([len(self.diagnostics[diag])]))
 
         ## Populate array by looping over list of stored arrays
-        for aa in range((len(torchqg.diagnostics[diag]))):
-            diag_tensor[...,aa]=torchqg.diagnostics[diag][aa]
+        for aa in range((len(self.diagnostics[diag]))):
+            diag_tensor[...,aa]=self.diagnostics[diag][aa]
 
         ## Now we can just average over this tensor
         return np.mean(diag_tensor,axis=-1)
