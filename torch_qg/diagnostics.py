@@ -75,6 +75,28 @@ attribute_database = [
 class Diagnostics():
     """ Include everything related to spectral diagnostics in this class """
 
+    def _initialise_diagnostics(self):
+        """ Set up arrays to store diagnostic quantities. Will also call
+            self._spectral_grid to initialise isotropically averaged wavenumbers.
+            Will also overwrite diagnostics if called manually """
+
+        self._spectral_grid()
+        ## Diagnostics are kinetic energy spectrum, spectral energy transfer, enstrophy spectrum
+        self.diagnostics={"KEspec":[],
+                    "SPE":[],
+                    "Ensspec":[]}
+        return
+
+    def _increment_diagnostics(self):
+        """ Add diagnostics of current system state to the self.diagnostics list """
+
+        ## First update derived quantities
+        self._calc_derived_fields
+
+        self.diagnostics["KEspec"].append(self.get_KE_ispec())
+        self.diagnostics["SPE"].append(self.get_spectral_energy_transfer())
+        self.diagnostics["Ensspec"].append(self.get_enstrophy_ispec())
+
     def _spectral_grid(self):
         """ Set up ispec grid """
 
@@ -194,6 +216,22 @@ class Diagnostics():
         """ Get enstrophy spectrum """
 
         return self.get_ispec_2(np.abs(self.qh)**2/self.M**2)
+
+    def get_aved_diagnostics(self,diag):
+        """ For a given diagnostic string, average over all saved states """
+
+        ## First we create the self.diagnostic[diag] list of arrays into a single array
+        ## Do this by first creating a tensor of shape
+        ## [n_layers,number of wavenumber bins,number of saved states]
+        ## to store all saved values
+        diag_tensor=np.empty(torchqg.diagnostics[diag][0].shape+tuple([len(torchqg.diagnostics[diag])]))
+
+        ## Populate array by looping over list of stored arrays
+        for aa in range((len(torchqg.diagnostics[diag]))):
+            diag_tensor[...,aa]=torchqg.diagnostics[diag][aa]
+
+        ## Now we can just average over this tensor
+        return np.mean(diag_tensor,axis=-1)
 
     def to_dataset(self):
         """ Convert current state variables to xarray dataset. Include
