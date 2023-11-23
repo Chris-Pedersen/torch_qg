@@ -155,6 +155,9 @@ class BaseQGModel():
         self.qh=torch.fft.rfftn(self.q,dim=(1,2))
         self.ph=self.invert(self.qh)
         self.p=torch.fft.irfftn(self.ph,dim=(1,2))
+        ## Get u, v in spectral space, then ifft to real space
+        self.u=torch.fft.irfftn(-self.il*self.ph,dim=(1,2))
+        self.v=torch.fft.irfftn(self.ik*self.ph,dim=(1,2))
         self.timestep=0 ## Reset timestep counter
         
         return
