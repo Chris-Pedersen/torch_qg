@@ -4,45 +4,6 @@ import copy
 import torch
 import xarray as xr
 
-# Define dict for variable dimensions
-spatial_dims = ('time','lev','y','x')
-spectral_dims = ('time','lev','l','k')
-dim_database = {
-    'q': spatial_dims,
-    'u': spatial_dims,
-    'v': spatial_dims,
-    'ufull': spatial_dims,
-    'vfull': spatial_dims, 
-    'qh': spectral_dims,
-    'uh': spectral_dims,
-    'vh': spectral_dims,
-    'ph': spectral_dims, 
-    'dqhdt': spectral_dims, 
-    'Ubg': ('lev'),
-    'Qy': ('lev'),
-}
-
-# dict for variable dimensions
-var_attr_database = {
-    'q':     { 'units': 's^-1',      'long_name': 'potential vorticity in real space',},
-    'qh':    { 'units': 's^-1',      'long_name': 'potential vorticity in spectral space',},
-    'ph':    { 'units': 'm^2 s^-1',  'long_name': 'streamfunction in spectral space',},
-    'p':     { 'units': 'm^2 s^-1',  'long_name': 'streamfunction in real space',},
-    'dqhdt': { 'units': 's^-2',      'long_name': 'previous partial derivative of potential vorticity wrt. time in spectral space',} , 
-    'dqdt':  { 'units': 's^-2',      'long_name': 'previous partial derivative of potential vorticity wrt. time in real space',} , 
-}
-
-# dict for coordinate dimensions
-coord_database = {
-    'time': ('time'),
-    'lev': ('lev'),
-    'lev_mid': ('lev_mid'),
-    'x': ('x'),
-    'y': ('y'),
-    'l': ('l'),
-    'k': ('k'),
-}
-
 # list for dataset attributes
 attribute_database = [
     'beta',
@@ -175,6 +136,14 @@ class Diagnostics():
 
         return phr
 
+    def get_total_KE(self):
+        """ Calculate total kinetic energy in system """
+
+        ke=(self.u**2 + self.v**2) * 0.5
+        ke=(self.L*torch.sum(ke))/(self.nx**2)
+
+        return ke
+
     def get_KE_ispec(self):
         """ From current state variables, calculate isotropically averaged KE spectra
             Do this for both upper and lower layers at once """
@@ -188,7 +157,7 @@ class Diagnostics():
         kef=((np.real(self.del1*self.ph[0]*np.conj(self.Jpxi[0])) + np.real(self.del2*self.ph[1]*np.conj(self.Jpxi[1])))/self.M**2)
         ape=(self.rd**-2*self.del1*self.del2*np.real((self.ph[0]-self.ph[1])*np.conj(self.Jptpc))/self.M**2)
 
-        return self.get_ispec_1(ape+kef)
+        return -self.get_ispec_1(ape+kef)
 
     def get_enstrophy_ispec(self):
         """ Get enstrophy spectrum """
@@ -227,7 +196,6 @@ class Diagnostics():
 
         return coordinates
 
-
     def state_to_dataset(self):
         """ Convert current state variables to xarray dataset. Do not include
             spectral quantities """
@@ -239,6 +207,8 @@ class Diagnostics():
                 { 'units': 's^-1',      'long_name': 'potential vorticity in real space',})
         variables["p"]=(('time','lev','y','x'),self.p.unsqueeze(0).numpy().copy(),
                 { 'units': 'm^2 s^-1',      'long_name': 'streamfunction in real space',})
+        variables["KE"]=(('time'),self.get_total_KE().unsqueeze(0).numpy(),
+                { 'units': 'm^2 s^-2',      'long_name': 'total KE',})
 
         ## Add spectral diagnostics if there are any
         if len(self.diagnostics["KEspec"])>0:
@@ -247,6 +217,6 @@ class Diagnostics():
             variables["Enspec"]=(('time','lev','k1d'),np.expand_dims(self.get_aved_diagnostics("Ensspec"),axis=0),
                             { 'units': 's^-2',  'long_name': 'Enstrophy spectrum'})
             variables["SPE"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE"),axis=0),
-                            { 'units': 'm^2 s^-3',  'long_name': 'Spectral energy transfer'})
+                            { 'units': 'm^3 s^-3',  'long_name': 'Spectral energy transfer'})
 
         return xr.Dataset(variables,coords=coords)
