@@ -1,4 +1,5 @@
 numpy
 pytest
 tqdm
+xarray
 torch==2.0.0
