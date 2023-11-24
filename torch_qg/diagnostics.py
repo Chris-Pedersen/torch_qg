@@ -2,6 +2,7 @@ import numpy as np
 import math
 import copy
 import torch
+import xarray as xr
 
 # Define dict for variable dimensions
 spatial_dims = ('time','lev','y','x')
@@ -132,6 +133,7 @@ class Diagnostics():
 
         ## Array to output isotropically averaged wavenumbers
         phr = np.zeros((self.k1d.size))
+
         ispec=copy.copy(field)
 
         ## Account for complex conjugate
@@ -209,20 +211,42 @@ class Diagnostics():
         ## Now we can just average over this tensor
         return np.mean(diag_tensor,axis=-1)
 
-    def to_dataset(self):
-        """ Convert current state variables to xarray dataset. Include
+    def get_coord_dic(self):
+        """ Generate coordinates dictionary for xarray output """
+
+        coordinates = {}
+        coordinates["time"] = ("time",np.array([self.dt*self.timestep]),
+                        {'long_name': 'model time', 'units': 's'})
+        coordinates["lev"] = ("lev",np.array([1,2]),{'long_name': 'vertical levels'})
+        coordinates["x"] = ("x",self.x[:,0].numpy(),
+                        {'long_name': 'real space grid points in the x direction', 'units': 'grid point',})
+        coordinates["y"] = ("y",self.y[0,:],
+                        {'long_name': 'real space grid points in the y direction', 'units': 'grid point',})
+        coordinates["k1d"] = ("k1d",self.k1d,
+                        {'long_name':'1D Fourier wavenumber for isotropically averaged spectra', 'units':'m^-1'})
+
+        return coordinates
+
+
+    def state_to_dataset(self):
+        """ Convert current state variables to xarray dataset. Do not include
             spectral quantities """
 
+        coords=self.get_coord_dic()
 
-        """ TODO: What spectral quantities do we want to store?
-            1. KE spectrum
-            2. Enstrophy spectrum
-            3. Spectral energy transfer
+        variables={}
+        variables["q"]=(('time','lev','y','x'),self.q.unsqueeze(0).numpy().copy(),
+                { 'units': 's^-1',      'long_name': 'potential vorticity in real space',})
+        variables["p"]=(('time','lev','y','x'),self.p.unsqueeze(0).numpy().copy(),
+                { 'units': 'm^2 s^-1',      'long_name': 'streamfunction in real space',})
 
-        
+        ## Add spectral diagnostics if there are any
+        if len(self.diagnostics["KEspec"])>0:
+            variables["KEspec"]=(('time','lev','k1d'),np.expand_dims(self.get_aved_diagnostics("KEspec"),axis=0),
+                            { 'units': 'm^2 s^-2',  'long_name': 'KE spectrum'})
+            variables["Enspec"]=(('time','lev','k1d'),np.expand_dims(self.get_aved_diagnostics("Ensspec"),axis=0),
+                            { 'units': 's^-2',  'long_name': 'Enstrophy spectrum'})
+            variables["SPE"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE"),axis=0),
+                            { 'units': 'm^2 s^-3',  'long_name': 'Spectral energy transfer'})
 
-        """
-
-        raise NotImplementedError
-
-        return 
+        return xr.Dataset(variables,coords=coords)

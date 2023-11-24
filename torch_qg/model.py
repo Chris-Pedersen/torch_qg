@@ -2,6 +2,7 @@ import torch
 import math
 import numpy as np
 from tqdm import tqdm
+import xarray as xr
 
 import torch_qg.diagnostics as diagnostics
 
@@ -222,30 +223,30 @@ class BaseQGModel():
         
         return torch.stack((ph1,ph2))
 
-    def run_sim(self,steps,store=False):
-        """ Evolve system forward in time by some number of steps """
+    def run_sim(self,steps,interval=1000):
+        """ Evolve system forward in time by some number of steps. Interval
+            sets the interval at which to store snapshots - these will be concat
+            into an xarray dataset and returned after the function has finished running. """
 
-        ## For now, lets just have the option to store all snapshots as we run
-        ## can add more complexity here once we trust the solver
-        store_snaps=None
-        if store==True:
-            store_snaps=torch.empty((steps,2,self.nx,self.nx))
+        ds=self.state_to_dataset()
 
         for aa in tqdm(range(steps)):
-            if store==True:
-                store_snaps[aa]=self.q
             self._step_ab3()
-            ## Check CFL every 1k timesteps
-            if self.timestep % 1000==0:
-                cfl=self.calc_cfl()
-                assert cfl<1., "CFL condition violated"
 
             ## If we hit NaNs, stop the show
             if torch.sum(torch.isnan(self.q))!=0:
                 print("NaNs in pv field, stopping sim")
                 break
 
-        return store_snaps
+            ## Check CFL every 1k timesteps
+            if self.timestep % 1000==0:
+                cfl=self.calc_cfl()
+                assert cfl<1., "CFL condition violated"
+
+            if self.timestep % interval==0:
+                ds=xr.concat((ds,self.state_to_dataset()),dim="time")
+                
+        return ds
 
     def _step_ab3(self):
         raise NotImplementedError("Implemented by subclass")
