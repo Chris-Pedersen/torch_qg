@@ -254,8 +254,8 @@ class BaseQGModel():
 
 class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
     def __init__(self,*args,**kwargs):
-        #super(BaseQGModel,self).__init__(*args,**kwargs)
         super().__init__(*args,**kwargs)
+        self.scheme="Arakawa"
 
     @staticmethod
     def diffx(x,dx):
@@ -352,6 +352,9 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
         ## such that all state variables are on the same timestep
         self.qh=torch.fft.rfftn(self.q,dim=(1,2))
         self.ph=self.invert(self.qh)
+        ## Get u, v in spectral space, then ifft to real space
+        self.u=torch.fft.irfftn(-self.il*self.ph,dim=(1,2))
+        self.v=torch.fft.irfftn(self.ik*self.ph,dim=(1,2))
         self.p=torch.fft.irfftn(self.ph,dim=(1,2))
         self.timestep+=1
 
@@ -364,9 +367,9 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
 
 class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
     def __init__(self,*args,**kwargs):
-        #super(BaseQGModel,self).__init__(*args,**kwargs)
         super().__init__(*args,**kwargs)
         self.filterfac=23.6
+        self.scheme="PseudoSpectral"
         self._initialize_filter()
 
     def _initialize_filter(self):
@@ -455,5 +458,3 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
             self._increment_diagnostics()
 
         return
-
-
