@@ -32,6 +32,7 @@ attribute_database = [
     'tsnapstart',
     'twrite',
     'W',
+    'scheme'  ## Record whether Arakawa or PseudoSpectral
 ]
 
 class Diagnostics():
@@ -219,4 +220,14 @@ class Diagnostics():
             variables["SPE"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE"),axis=0),
                             { 'units': 'm^3 s^-3',  'long_name': 'Spectral energy transfer'})
 
-        return xr.Dataset(variables,coords=coords)
+        global_attrs = {}
+        for aname in attribute_database:
+            if hasattr(self, aname):
+                data = getattr(self, aname)
+                global_attrs[f"torchqg:{aname}"] = (data)
+
+        ds=xr.Dataset(variables,coords=coords,attrs=global_attrs)
+        ds.attrs['title'] = 'torchqg: 2-layer Quasigeostrophic system evolved in PyTorch'
+        ds.attrs['reference'] = 'https://github.com/Chris-Pedersen/torch_qg'
+
+        return ds
