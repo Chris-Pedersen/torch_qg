@@ -208,6 +208,10 @@ class Diagnostics():
                 { 'units': 's^-1',      'long_name': 'potential vorticity in real space',})
         variables["p"]=(('time','lev','y','x'),self.p.unsqueeze(0).numpy().copy(),
                 { 'units': 'm^2 s^-1',      'long_name': 'streamfunction in real space',})
+        variables["u"]=(('time','lev','y','x'),self.u.unsqueeze(0).numpy().copy(),
+                { 'units': 'm s^-1',      'long_name': 'zonal velocity',})
+        variables["v"]=(('time','lev','y','x'),self.v.unsqueeze(0).numpy().copy(),
+                { 'units': 'm s^-1',      'long_name': 'meridional velocity',})
         variables["KE"]=(('time'),self.get_total_KE().unsqueeze(0).numpy(),
                 { 'units': 'm^2 s^-2',      'long_name': 'total KE',})
 
