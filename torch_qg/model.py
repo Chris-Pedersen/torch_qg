@@ -23,6 +23,7 @@ class BaseQGModel():
         parameterization=None,      # parameterization
         diagnostics_start=4e4,      # Number of timesteps after which to start sampling diagnostics
         diagnostics_freq=25,        # Frequency at which to sample diagnostics
+        silence=False,              # Set to True to disable progress bar (to prevent slurm logs being polluted)
         **kwargs
         ):
         """
@@ -60,6 +61,7 @@ class BaseQGModel():
         self.nk = nx/2 + 1
         self.dt = dt
         self.parameterization = parameterization
+        self.silence=False
 
         ## Diagnostics config
         self.diagnostics_start=diagnostics_start
@@ -230,7 +232,7 @@ class BaseQGModel():
 
         ds=self.state_to_dataset()
 
-        for aa in tqdm(range(steps)):
+        for aa in tqdm(range(steps),disable=self.silence):
             self._step_ab3()
 
             ## If we hit NaNs, stop the show
