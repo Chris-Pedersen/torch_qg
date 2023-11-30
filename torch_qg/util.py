@@ -3,10 +3,55 @@ import matplotlib.animation as animation
 from IPython.display import HTML
 import cmocean
 import numpy as np
+from matplotlib.pyplot import cm
 
+
+## Second to year conversion for animation time ticker
 YEAR = 24*60*60*360.
 
+
+def plot_many_spectra(ds_list,string_list,suptitle=None,savename=None):
+    """ For a list of datasets, plot common spectral quantities. string_list will
+        set the label for each line """
+
+    col = cm.rainbow(np.linspace(0, 1, len(ds_list)))
+    fig, axs = plt.subplots(2, 2,figsize=(10,5))
+    axs[0,0].set_title("Spectral energy transfer")
+    axs[0,1].set_title("Enstrophy spectrum")
+
+    axs[1,0].set_title("Kinetic energy spectrum")
+    axs[1,1].set_title("Kinetic energy over time")
+    
+    for aa,ds in enumerate(ds_list):
+        ## Spectral energy transfer
+        axs[0,0].semilogx(ds.k1d,ds.SPE[-1],color=col[aa])
+
+        ## Enstrophy spectra
+        axs[0,1].loglog(ds.k1d,ds.Enspec[-1,0],color=col[aa])
+        axs[0,1].loglog(ds.k1d,ds.Enspec[-1,1],color=col[aa],linestyle="dashed")
+        axs[0,1].set_ylim(5e-10,6e-6)
+
+        ## Kinetic energy spectra
+        axs[1,0].loglog(ds.k1d,ds.KEspec[-1,0],color=col[aa],label=string_list[aa])
+        axs[1,0].loglog(ds.k1d,ds.KEspec[-1,1],color=col[aa],linestyle="dashed")
+        axs[1,0].legend()
+        axs[1,0].set_ylim(1e-4,5e2)
+        axs[1,0].set_xlabel("k")
+
+        ## Kinetic energy over time
+        axs[1,1].plot(ds.time,ds.KE,color=col[aa])
+        axs[1,1].set_xlabel("time (seconds)")
+        
+    if suptitle is not None:
+        fig.suptitle(suptitle)
+
+    plt.tight_layout()
+    if savename is not None:
+        plt.savefig("%s.png" % savename)
+
 class SimAnimation():
+    """ Generate animation of a given dataset. Will just plot the upper and
+        lower q fields for every snapshot in the dataset """
     def __init__(self,ds,fps=10,save_string=None):
         self.ds=ds
         self.nSteps=len(self.ds.q)
