@@ -71,7 +71,7 @@ class SimAnimation():
         self.ax2.set_array(image)
         self.ax2.set_clim(-np.max(np.abs(image)), np.max(np.abs(image)))
         
-        self.time_text.set_text("time=%.2f (years)" % (ds.time[i].to_numpy()/YEAR))
+        self.time_text.set_text("time=%.2f (years)" % (self.ds.time[i].to_numpy()/YEAR))
         
         return 
     
