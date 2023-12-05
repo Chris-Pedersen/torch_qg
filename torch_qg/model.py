@@ -61,7 +61,7 @@ class BaseQGModel():
         self.nk = nx/2 + 1
         self.dt = dt
         self.parameterization = parameterization
-        self.silence=False
+        self.silence=silence
 
         ## Diagnostics config
         self.diagnostics_start=diagnostics_start
@@ -256,7 +256,7 @@ class BaseQGModel():
 
 class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
     def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
+        super(ArakawaModel,self).__init__(*args,**kwargs)
         self.scheme="Arakawa"
 
     @staticmethod
@@ -368,19 +368,27 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
 
 
 class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
+    def __init__(self,dealias=False,*args,**kwargs):
+        super(PseudoSpectralModel,self).__init__(*args,**kwargs)
         self.filterfac=23.6
         self.scheme="PseudoSpectral"
-        self._initialize_filter()
+        self.dealias=dealias
+        self._initialize_filter(self.dealias)
 
-    def _initialize_filter(self):
+    def _initialize_filter(self,dealias=False):
         """Set up frictional filter."""
-        # this defines the spectral filter (following Arbic and Flierl, 2003)
-        cphi=0.65*math.pi
-        wvx=np.sqrt((self.k*self.dx)**2.+(self.l*self.dy)**2.)
-        filtr = np.exp(-self.filterfac*(wvx-cphi)**4.)
-        filtr[wvx<=cphi] = 1.
+
+        if self.dealias==False:
+            # this defines the spectral filter (following Arbic and Flierl, 2003)
+            cphi=0.65*math.pi
+            wvx=np.sqrt((self.k*self.dx)**2.+(self.l*self.dy)**2.)
+            filtr = np.exp(-self.filterfac*(wvx-cphi)**4.)
+            filtr[wvx<=cphi] = 1.
+        else:
+            filtr = torch.zeros_like(self.kappa2)
+            n = self.nx // 3
+            filtr[:n,:n] = 1
+            filtr[-n:,:n] = 1
         self.filtr = filtr
 
         return
@@ -413,6 +421,9 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
 
         ## Bottom drag
         rhsh[1]+=self.rek*self.kappa2*ph[1]
+
+        if self.parameterization is not None:
+            rhsh+=torch.fft.rfftn(self.parameterization(q,ph,self.ik,self.il,self.dx),dim=(1,2))
 
         return rhsh
 
