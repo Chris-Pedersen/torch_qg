@@ -398,9 +398,7 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
             spectral space. Returns advection tendency in spectral space.
             Does not update any state variables. """
 
-        uq = u*q ## Real space quantities
-        vq = v*q ## Real space quantities
-        tend = -self.ik*torch.fft.rfftn(uq,dim=(1,2)) - self.il*torch.fft.rfftn(vq,dim=(1,2))
+        tend = -self.ik*torch.fft.rfftn(u*q,dim=(1,2)) - self.il*torch.fft.rfftn(v*q,dim=(1,2))
 
         return tend
 
