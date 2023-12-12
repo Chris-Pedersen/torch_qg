@@ -50,7 +50,7 @@ class Smagorinsky():
         vh=ik*ph
         Sxx = torch.fft.irfftn(uh*ik,dim=(1,2))
         Syy = torch.fft.irfftn(vh*il,dim=(1,2))
-        Sxy = 0.5 * torch.fft.irfftn(uh * il + vh * ik)
+        Sxy = 0.5 * torch.fft.irfftn(uh * il + vh * ik,dim=(1,2))
         nu = (self.constant * dx)**2 * torch.sqrt(2 * (Sxx**2 + Syy**2 + 2 * Sxy**2))
         nu_Sxxh = torch.fft.rfftn(nu * Sxx,dim=(1,2))
         nu_Sxyh = torch.fft.rfftn(nu * Sxy,dim=(1,2))
