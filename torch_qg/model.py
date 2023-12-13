@@ -126,6 +126,9 @@ class BaseQGModel():
         self.l=self.l.T ## Meridional
         self.ik = 1j*self.k
         self.il = 1j*self.l
+        ## Field to store parameterization in spectral space at each timestep
+        ## used in diagnostics
+        self.dqh = None 
         
         ## kappa2 represents the wavenumber squared at each gridpoint
         self.kappa2=(self.l**2+self.k**2)
@@ -306,7 +309,9 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
         rhs[1]+=-self.rek*d2p[1]
         
         if self.parameterization is not None:
-            rhs+=self.parameterization(q,ph,self.ik,self.il,self.dx)
+            param=self.parameterization(q,ph,self.ik,self.il,self.dx)
+            self.dqh=torch.fft.rfftn(param,dim=(1,2))
+            rhs+=param
         
         return rhs
 
@@ -421,7 +426,8 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
         rhsh[1]+=self.rek*self.kappa2*ph[1]
 
         if self.parameterization is not None:
-            rhsh+=torch.fft.rfftn(self.parameterization(q,ph,self.ik,self.il,self.dx),dim=(1,2))
+            self.dqh=torch.fft.rfftn(self.parameterization(q,ph,self.ik,self.il,self.dx),dim=(1,2))
+            rhsh+=self.dqh
 
         return rhsh
 
