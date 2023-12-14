@@ -154,6 +154,7 @@ class BaseQGModel():
         ## Diagnostics are kinetic energy spectrum, spectral energy transfer, enstrophy spectrum
         self.diagnostics={"KEspec":[],
                     "SPE":[],
+                    "SPE2":[],
                     "Ensspec":[]}
         
         return
@@ -336,6 +337,8 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
 
         ## First update q -> q_{i+1}
         rhs=self.rhs(self.q,self.qh,self.p,self.ph)
+        ## Store rhsh for spectral energy transfer computation
+        self.rhsh=torch.fft.rfftn(rhs,dim=(1,2))
         ## If we have no n_{i-1} timestep, we just do forward Euler
         if self.rhs_minus_one==None:
             self.q=self.q+rhs*self.dt
@@ -439,6 +442,8 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
 
         ## First update qh -> qh_{i+1}
         rhsh=self.rhsh(self.q,self.qh,self.ph,self.u,self.v)
+        ## Store rhsh for spectral energy transfer computation
+        self.rhsh=rhsh
         ## If we have no n_{i-1} timestep, we just do forward Euler
         if self.rhs_minus_one==None:
             self.qh=self.qh+rhsh*self.dt
