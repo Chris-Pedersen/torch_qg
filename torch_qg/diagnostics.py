@@ -157,8 +157,16 @@ class Diagnostics():
 
         kef=((np.real(self.del1*self.ph[0]*np.conj(self.Jpxi[0])) + np.real(self.del2*self.ph[1]*np.conj(self.Jpxi[1])))/self.M**2)
         ape=(self.rd**-2*self.del1*self.del2*np.real((self.ph[0]-self.ph[1])*np.conj(self.Jptpc))/self.M**2)
+        
+        ## Sum contributions of ape and kinetic energy flux
+        spec_trans=ape+kef
+        
+        ## If we are using a parameterization, include contribution too
+        if self.parameterization:
+            paramspec=-torch.real((self.height_ratios * torch.conj(self.ph) * self.dqh).sum(axis=0)) / self.M**2
+            spec_trans+=paramspec
 
-        return -self.get_ispec_1(ape+kef)
+        return -self.get_ispec_1(spec_trans)
 
     def get_enstrophy_ispec(self):
         """ Get enstrophy spectrum """
