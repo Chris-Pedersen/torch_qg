@@ -175,7 +175,8 @@ class Diagnostics():
             calculate using an alternative method, just the cross-spectrum between
             streamfunction and rhs """
 
-        spec_trans=-torch.real((self.height_ratios * torch.conj(self.ph) * self.rhsh_i).sum(axis=0)) / self.M**2
+
+        spec_trans=-torch.real((self.height_ratios * torch.conj(self.ph) * self.rhsh).sum(axis=0)) / self.M**2
 
         return self.get_ispec_1(spec_trans)
 
@@ -242,7 +243,7 @@ class Diagnostics():
                             { 'units': 's^-2',  'long_name': 'Enstrophy spectrum'})
             variables["SPE"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE"),axis=0),
                             { 'units': 'm^3 s^-3',  'long_name': 'Spectral energy transfer'})
-            variables["SPE2"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE"),axis=0),
+            variables["SPE2"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE2"),axis=0),
                             { 'units': 'm^3 s^-3',  'long_name': 'Spectral energy transfer'})
 
         global_attrs = {}
