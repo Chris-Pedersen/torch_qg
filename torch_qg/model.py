@@ -128,7 +128,8 @@ class BaseQGModel():
         self.il = 1j*self.l
         ## Field to store parameterization in spectral space at each timestep
         ## used in diagnostics
-        self.dqh = None 
+        self.dqh = None
+        self.height_ratios = (self.Hi / self.H)[:,np.newaxis,np.newaxis]
         
         ## kappa2 represents the wavenumber squared at each gridpoint
         self.kappa2=(self.l**2+self.k**2)
