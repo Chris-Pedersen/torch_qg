@@ -279,7 +279,6 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
     def __init__(self,minus=1,*args,**kwargs):
         super(ArakawaModel,self).__init__(*args,**kwargs)
         self.scheme="Arakawa"
-        self.minus=minus
 
     @staticmethod
     def diffx(x,dx):
@@ -317,7 +316,7 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
         d2p=torch.fft.irfftn(-self.kappa2*ph,dim=(1,2))
         dq=torch.fft.irfftn(self.ik*qh,dim=(1,2))
         
-        rhs=self.minus*self.advect(q,p)
+        rhs=self.advect(q,p)
         rhs[0]+=(-self.betas[0]*dp[0])
         rhs[1]+=(-self.betas[1]*dp[1])
         
