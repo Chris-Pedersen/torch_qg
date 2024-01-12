@@ -155,23 +155,8 @@ class BaseQGModel():
 
         ## Diagnostics are kinetic energy spectrum, spectral energy transfer, enstrophy spectrum
         self.diagnostics={"KEspec":[],
-                    "SPE":[],
-                    "SPE2":[],
+                    "SPE":[],#"SPE2":[],
                     "Ensspec":[]}
-
-        ############ ADDED FROM PYQG ###############
-        # the meridional PV gradients in each layer
-        self.Qy1 = self.beta + self.F1*(self.U1 - self.U2)
-        self.Qy2 = self.beta - self.F2*(self.U1 - self.U2)
-        self.Qy = torch.tensor([self.Qy1, self.Qy2])
-        # complex versions, multiplied by k, speeds up computations to precompute
-        self.ikQy1 = self.Qy1 * 1j * self.k
-        self.ikQy2 = self.Qy2 * 1j * self.k
-
-        # vector version
-        self.ikQy = torch.tensor(np.vstack([self.ikQy1[np.newaxis,...],
-                               self.ikQy2[np.newaxis,...]]),dtype=torch.float64)
-        self.ilQx = 0.
         
         return
     
