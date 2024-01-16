@@ -46,6 +46,7 @@ class Diagnostics():
 
         self.diagnostics["KEspec"].append(self.get_KE_ispec())
         self.diagnostics["SPE"].append(self.get_spectral_energy_transfer())
+        #self.diagnostics["SPE2"].append(self.get_spectral_energy_transfer2())
         self.diagnostics["Ensspec"].append(self.get_enstrophy_ispec())
 
     def _calc_derived_fields(self):
@@ -153,7 +154,8 @@ class Diagnostics():
         return self.get_ispec_2(self.kappa2*np.abs(self.ph)**2/self.M**2)
 
     def get_spectral_energy_transfer(self):
-        """ Return spectral energy transfer """
+        """ Return spectral energy transfer. Calculations taken from pyqg - individual terms
+            due to ke flux and ape are calculated """
 
         kef=((np.real(self.del1*self.ph[0]*np.conj(self.Jpxi[0])) + np.real(self.del2*self.ph[1]*np.conj(self.Jpxi[1])))/self.M**2)
         ape=(self.rd**-2*self.del1*self.del2*np.real((self.ph[0]-self.ph[1])*np.conj(self.Jptpc))/self.M**2)
@@ -166,7 +168,18 @@ class Diagnostics():
             paramspec=-torch.real((self.height_ratios * torch.conj(self.ph) * self.dqh).sum(axis=0)) / self.M**2
             spec_trans+=paramspec
 
-        return -self.get_ispec_1(spec_trans)
+        return self.get_ispec_1(spec_trans)
+
+    def get_spectral_energy_transfer2(self):
+        """ Return spectral energy transfer:
+            calculate using an alternative method, just the cross-spectrum between
+            streamfunction and rhs """
+
+        rhsh=self.rhsh(self.q,self.qh,self.ph,self.u,self.v)
+
+        spec_trans=-torch.real((self.height_ratios * torch.conj(self.ph) * rhsh).sum(axis=0)) / self.M**2
+
+        return self.get_ispec_1(spec_trans)
 
     def get_enstrophy_ispec(self):
         """ Get enstrophy spectrum """
@@ -200,7 +213,7 @@ class Diagnostics():
                         {'long_name': 'real space grid points in the x direction', 'units': 'grid point',})
         coordinates["y"] = ("y",self.y[0,:],
                         {'long_name': 'real space grid points in the y direction', 'units': 'grid point',})
-        coordinates["k1d"] = ("k1d",self.k1d,
+        coordinates["k1d"] = ("k1d",self.k1d_plot,
                         {'long_name':'1D Fourier wavenumber for isotropically averaged spectra', 'units':'m^-1'})
 
         return coordinates
@@ -231,6 +244,8 @@ class Diagnostics():
                             { 'units': 's^-2',  'long_name': 'Enstrophy spectrum'})
             variables["SPE"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE"),axis=0),
                             { 'units': 'm^3 s^-3',  'long_name': 'Spectral energy transfer'})
+            #variables["SPE2"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE2"),axis=0),
+            #                { 'units': 'm^3 s^-3',  'long_name': 'Spectral energy transfer'})
 
         global_attrs = {}
         for aname in attribute_database:

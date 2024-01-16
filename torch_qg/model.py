@@ -1,8 +1,8 @@
+import xarray as xr
 import torch
 import math
 import numpy as np
 from tqdm import tqdm
-import xarray as xr
 
 import torch_qg.diagnostics as diagnostics
 
@@ -58,7 +58,7 @@ class BaseQGModel():
         self.L = L
         self.W = L
         self.nl = nx
-        self.nk = nx/2 + 1
+        self.nk = int(nx/2 + 1)
         self.dt = dt
         self.parameterization = parameterization
         self.silence=silence
@@ -85,6 +85,7 @@ class BaseQGModel():
         self.F2 = self.delta*self.F1
         self.H = self.Hi.sum()
         self.betas=torch.tensor([self.beta+self.F1*(self.U1-self.U2),self.beta-self.F2*(self.U1-self.U2)])
+        self.Ubg = torch.tensor([self.U1,self.U2])
 
         ## Set up tensor for background velocities, used in rhs calculations
         self.u_mean=torch.ones((2,self.nx,self.ny))
@@ -99,8 +100,8 @@ class BaseQGModel():
         """ Set up real-space and spectral-space grids """
         
         self.x,self.y = torch.meshgrid(
-        torch.arange(0.5,self.nx,1.)/self.nx*self.L,
-        torch.arange(0.5,self.ny,1.)/self.ny*self.W )
+        torch.arange(0.5,self.nx,1.,dtype=torch.float64)/self.nx*self.L,
+        torch.arange(0.5,self.ny,1.,dtype=torch.float64)/self.ny*self.W )
         ## physical grid spacing
         self.dx = self.L / self.nx
         self.dy = self.W / self.ny
@@ -114,9 +115,9 @@ class BaseQGModel():
         ## Define wavenumber arrays - nb that fft comes out
         ## with positive frequencies, then negative frequencies,
         ## and that rfft returns only half the plane
-        self.ll = self.dl*torch.cat((torch.arange(0.,self.nx/2),
-            torch.arange(-self.nx/2,0.)))
-        self.kk = self.dk*torch.arange(0.,self.nk)
+        self.ll = self.dl*torch.cat((torch.arange(0.,self.nx/2,dtype=torch.float64),
+            torch.arange(-self.nx/2,0.,dtype=torch.float64)))
+        self.kk = self.dk*torch.arange(0.,self.nk,dtype=torch.float64)
 
         ## Get wavenumber grids in complex plane
         self.k, self.l = torch.meshgrid(self.kk, self.ll)
@@ -149,11 +150,12 @@ class BaseQGModel():
 
         kmax = np.minimum(ll_max, kk_max)
         self.dkr = np.sqrt(self.dk**2 + self.dl**2)
-        self.k1d=np.arange(0, kmax, self.dkr)+self.dkr/2
+        self.k1d=np.arange(0, kmax, self.dkr)
+        self.k1d_plot=self.k1d+self.dkr/2
 
         ## Diagnostics are kinetic energy spectrum, spectral energy transfer, enstrophy spectrum
         self.diagnostics={"KEspec":[],
-                    "SPE":[],
+                    "SPE":[],#"SPE2":[],
                     "Ensspec":[]}
         
         return
@@ -259,7 +261,7 @@ class BaseQGModel():
 
 
 class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
-    def __init__(self,*args,**kwargs):
+    def __init__(self,minus=1,*args,**kwargs):
         super(ArakawaModel,self).__init__(*args,**kwargs)
         self.scheme="Arakawa"
 
@@ -299,7 +301,7 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
         d2p=torch.fft.irfftn(-self.kappa2*ph,dim=(1,2))
         dq=torch.fft.irfftn(self.ik*qh,dim=(1,2))
         
-        rhs=-1*self.advect(q,p)
+        rhs=self.advect(q,p)
         rhs[0]+=(-self.betas[0]*dp[0])
         rhs[1]+=(-self.betas[1]*dp[1])
         
@@ -336,6 +338,8 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
 
         ## First update q -> q_{i+1}
         rhs=self.rhs(self.q,self.qh,self.p,self.ph)
+        ## Store rhsh for spectral energy transfer computation
+        self.rhsh_i=torch.fft.rfftn(rhs,dim=(1,2))
         ## If we have no n_{i-1} timestep, we just do forward Euler
         if self.rhs_minus_one==None:
             self.q=self.q+rhs*self.dt
@@ -413,7 +417,7 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
             Does not update any state variables. """
 
         ## Advection term
-        rhsh=-self.advect(q,u,v)
+        rhsh=self.advect(q,u,v)
 
         ## Beta effect
         rhsh[0]+=-self.ik*self.betas[0]*ph[0]
@@ -439,6 +443,8 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
 
         ## First update qh -> qh_{i+1}
         rhsh=self.rhsh(self.q,self.qh,self.ph,self.u,self.v)
+        ## Store rhsh for spectral energy transfer computation
+        self.rhsh_i=rhsh
         ## If we have no n_{i-1} timestep, we just do forward Euler
         if self.rhs_minus_one==None:
             self.qh=self.qh+rhsh*self.dt
