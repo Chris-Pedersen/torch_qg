@@ -46,7 +46,7 @@ class Diagnostics():
 
         self.diagnostics["KEspec"].append(self.get_KE_ispec())
         self.diagnostics["SPE"].append(self.get_spectral_energy_transfer())
-        self.diagnostics["SPE2"].append(self.get_spectral_energy_transfer2())
+        #self.diagnostics["SPE2"].append(self.get_spectral_energy_transfer2())
         self.diagnostics["Ensspec"].append(self.get_enstrophy_ispec())
 
     def _calc_derived_fields(self):
