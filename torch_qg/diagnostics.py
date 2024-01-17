@@ -72,11 +72,11 @@ class Diagnostics():
         q in spectral space. Do everything in numpy here, since we are just
         doing diagnostics """
         if u is None:
-            u = self.u.numpy()
+            u = self.u.cpu().numpy()
         if v is None:
-            v = self.v.numpy()
-        uq = u*q
-        vq = v*q
+            v = self.v.cpu().numpy()
+        uq = (u*q).cpu()
+        vq = (v*q).cpu()
 
         ## Hack imported from pyqg, to avoid shaping issues when passing single-layer
         ## tensors to the fft. It's a bit messy but in a rush right now
@@ -85,7 +85,7 @@ class Diagnostics():
             uq = np.tile(uq[np.newaxis,:,:], (2,1,1))
             vq = np.tile(vq[np.newaxis,:,:], (2,1,1))
 
-        tend = self.ik*np.fft.rfftn(uq,axes=(1,2)) + self.il*np.fft.rfftn(vq,axes=(1,2))
+        tend = self.ik.cpu()*np.fft.rfftn(uq,axes=(1,2)) + self.il.cpu()*np.fft.rfftn(vq,axes=(1,2))
         if is_2d:
             return tend[0]
         else:
@@ -144,14 +144,14 @@ class Diagnostics():
         ke=(self.u**2 + self.v**2) * 0.5
         ke=(self.L*torch.sum(ke))/(self.nx**2)
 
-        return ke
+        return ke.cpu()
 
     def get_KE_ispec(self):
         """ From current state variables, calculate isotropically averaged KE spectra
             Do this for both upper and lower layers at once """
 
         #KEspec=(self.kappa2*np.abs(self.ph)**2/self.M**2)
-        return self.get_ispec_2(self.kappa2*np.abs(self.ph)**2/self.M**2)
+        return self.get_ispec_2(self.kappa2.cpu()*np.abs(self.ph.cpu())**2/self.M**2)
 
     def get_spectral_energy_transfer(self):
         """ Return spectral energy transfer. Calculations taken from pyqg - individual terms
@@ -209,9 +209,9 @@ class Diagnostics():
         coordinates["time"] = ("time",np.array([self.dt*self.timestep]),
                         {'long_name': 'model time', 'units': 's'})
         coordinates["lev"] = ("lev",np.array([1,2]),{'long_name': 'vertical levels'})
-        coordinates["x"] = ("x",self.x[:,0].numpy(),
+        coordinates["x"] = ("x",self.x[:,0].cpu().numpy(),
                         {'long_name': 'real space grid points in the x direction', 'units': 'grid point',})
-        coordinates["y"] = ("y",self.y[0,:],
+        coordinates["y"] = ("y",self.y[0,:].cpu(),
                         {'long_name': 'real space grid points in the y direction', 'units': 'grid point',})
         coordinates["k1d"] = ("k1d",self.k1d_plot,
                         {'long_name':'1D Fourier wavenumber for isotropically averaged spectra', 'units':'m^-1'})
@@ -225,13 +225,13 @@ class Diagnostics():
         coords=self.get_coord_dic()
 
         variables={}
-        variables["q"]=(('time','lev','y','x'),self.q.unsqueeze(0).numpy().copy(),
+        variables["q"]=(('time','lev','y','x'),self.q.cpu().unsqueeze(0).numpy().copy(),
                 { 'units': 's^-1',      'long_name': 'potential vorticity in real space',})
-        variables["p"]=(('time','lev','y','x'),self.p.unsqueeze(0).numpy().copy(),
+        variables["p"]=(('time','lev','y','x'),self.p.cpu().unsqueeze(0).numpy().copy(),
                 { 'units': 'm^2 s^-1',      'long_name': 'streamfunction in real space',})
-        variables["u"]=(('time','lev','y','x'),self.u.unsqueeze(0).numpy().copy(),
+        variables["u"]=(('time','lev','y','x'),self.u.cpu().unsqueeze(0).numpy().copy(),
                 { 'units': 'm s^-1',      'long_name': 'zonal velocity',})
-        variables["v"]=(('time','lev','y','x'),self.v.unsqueeze(0).numpy().copy(),
+        variables["v"]=(('time','lev','y','x'),self.v.cpu().unsqueeze(0).numpy().copy(),
                 { 'units': 'm s^-1',      'long_name': 'meridional velocity',})
         variables["KE"]=(('time'),self.get_total_KE().unsqueeze(0).numpy(),
                 { 'units': 'm^2 s^-2',      'long_name': 'total KE',})
