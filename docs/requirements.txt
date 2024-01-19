@@ -1,7 +1,7 @@
+torch==2.0.0
 numpy
 pytest
 tqdm
 xarray
-torch==2.0.0
 sphinx==7.2.6
 sphinx-rtd-theme>=1.2.0
