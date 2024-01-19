@@ -72,20 +72,20 @@ class Diagnostics():
         q in spectral space. Do everything in numpy here, since we are just
         doing diagnostics """
         if u is None:
-            u = self.u.cpu().numpy()
+            u = self.u
         if v is None:
-            v = self.v.cpu().numpy()
-        uq = (u*q).cpu()
-        vq = (v*q).cpu()
+            v = self.v
+        uq = u*q
+        vq = v*q
 
-        ## Hack imported from pyqg, to avoid shaping issues when passing single-layer
+        ## If input tensors are 1d, 
         ## tensors to the fft. It's a bit messy but in a rush right now
         is_2d = (uq.ndim==2)
         if is_2d:
-            uq = np.tile(uq[np.newaxis,:,:], (2,1,1))
-            vq = np.tile(vq[np.newaxis,:,:], (2,1,1))
+            uq = uq.expand(2,uq.shape[-1],uq.shape[-1])
+            vq = vq.expand(2,vq.shape[-1],vq.shape[-1])
 
-        tend = self.ik.cpu()*np.fft.rfftn(uq,axes=(1,2)) + self.il.cpu()*np.fft.rfftn(vq,axes=(1,2))
+        tend = self.ik*torch.fft.rfftn(uq,dim=(1,2)) + self.il*torch.fft.rfftn(vq,dim=(1,2))
         if is_2d:
             return tend[0]
         else:
