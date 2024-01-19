@@ -72,20 +72,20 @@ class Diagnostics():
         q in spectral space. Do everything in numpy here, since we are just
         doing diagnostics """
         if u is None:
-            u = self.u.cpu().numpy()
+            u = self.u
         if v is None:
-            v = self.v.cpu().numpy()
-        uq = (u*q).cpu()
-        vq = (v*q).cpu()
+            v = self.v
+        uq = u*q
+        vq = v*q
 
         ## Hack imported from pyqg, to avoid shaping issues when passing single-layer
         ## tensors to the fft. It's a bit messy but in a rush right now
         is_2d = (uq.ndim==2)
         if is_2d:
-            uq = np.tile(uq[np.newaxis,:,:], (2,1,1))
-            vq = np.tile(vq[np.newaxis,:,:], (2,1,1))
+            uq = uq.expand(2,uq.shape[-1],uq.shape[-1])
+            vq = vq.expand(2,vq.shape[-1],vq.shape[-1])
 
-        tend = self.ik.cpu()*np.fft.rfftn(uq,axes=(1,2)) + self.il.cpu()*np.fft.rfftn(vq,axes=(1,2))
+        tend = self.ik*torch.fft.rfftn(uq,dim=(1,2)) + self.il*torch.fft.rfftn(vq,dim=(1,2))
         if is_2d:
             return tend[0]
         else:
@@ -97,7 +97,7 @@ class Diagnostics():
         ## Array to output isotropically averaged wavenumbers
         phr = np.zeros((self.k1d.size))
 
-        ispec=copy.copy(field)
+        ispec=copy.copy(field.cpu().numpy())
 
         ## Account for complex conjugate
         ispec[:,0] /= 2
@@ -106,9 +106,9 @@ class Diagnostics():
         ## Loop over wavenumbers. Average all modes within a given |k| range
         for i in range(self.k1d.size):
             if i == self.k1d.size-1:
-                fkr = (self.kappa>=self.k1d[i]) & (self.kappa<=self.k1d[i]+self.dkr)
+                fkr = (self.kappa_cpu>=self.k1d[i]) & (self.kappa_cpu<=self.k1d[i]+self.dkr)
             else:
-                fkr = (self.kappa>=self.k1d[i]) & (self.kappa<self.k1d[i+1])
+                fkr = (self.kappa_cpu>=self.k1d[i]) & (self.kappa_cpu<self.k1d[i+1])
             phr[i] = ispec[fkr].mean(axis=-1) * (self.k1d[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
 
             phr[i] *= 2 # include full circle
@@ -120,7 +120,7 @@ class Diagnostics():
 
         ## Array to output isotropically averaged wavenumbers
         phr = np.zeros((2,self.k1d.size))
-        ispec=copy.copy(field)
+        ispec=copy.copy(field.cpu().numpy())
 
         ## Account for complex conjugate
         ispec[:,:,0] /= 2
@@ -129,9 +129,9 @@ class Diagnostics():
         ## Loop over wavenumbers. Average all modes within a given |k| range
         for i in range(self.k1d.size):
             if i == self.k1d.size-1:
-                fkr = (self.kappa>=self.k1d[i]) & (self.kappa<=self.k1d[i]+self.dkr)
+                fkr = (self.kappa_cpu>=self.k1d[i]) & (self.kappa_cpu<=self.k1d[i]+self.dkr)
             else:
-                fkr = (self.kappa>=self.k1d[i]) & (self.kappa<self.k1d[i+1])
+                fkr = (self.kappa_cpu>=self.k1d[i]) & (self.kappa_cpu<self.k1d[i+1])
             phr[:,i] = ispec[:,fkr].mean(axis=-1) * (self.k1d[i]+self.dkr/2) * math.pi / (self.dk * self.dl)
 
             phr[:,i] *= 2 # include full circle
@@ -157,8 +157,8 @@ class Diagnostics():
         """ Return spectral energy transfer. Calculations taken from pyqg - individual terms
             due to ke flux and ape are calculated """
 
-        kef=((np.real(self.del1*self.ph[0]*np.conj(self.Jpxi[0])) + np.real(self.del2*self.ph[1]*np.conj(self.Jpxi[1])))/self.M**2)
-        ape=(self.rd**-2*self.del1*self.del2*np.real((self.ph[0]-self.ph[1])*np.conj(self.Jptpc))/self.M**2)
+        kef=((torch.real(self.del1*self.ph[0]*torch.conj(self.Jpxi[0])) + torch.real(self.del2*self.ph[1]*torch.conj(self.Jpxi[1])))/self.M**2)
+        ape=(self.rd**-2*self.del1*self.del2*torch.real((self.ph[0]-self.ph[1])*torch.conj(self.Jptpc))/self.M**2)
         
         ## Sum contributions of ape and kinetic energy flux
         spec_trans=ape+kef
@@ -184,7 +184,7 @@ class Diagnostics():
     def get_enstrophy_ispec(self):
         """ Get enstrophy spectrum """
 
-        return self.get_ispec_2(np.abs(self.qh)**2/self.M**2)
+        return self.get_ispec_2(torch.abs(self.qh)**2/self.M**2)
 
     def get_aved_diagnostics(self,diag):
         """ For a given diagnostic string, average over all saved states """
