@@ -150,6 +150,7 @@ class BaseQGModel():
         ## kappa2 represents the wavenumber squared at each gridpoint
         self.kappa2=(self.l**2+self.k**2)
         self.kappa=torch.sqrt(self.kappa2)
+        self.kappa_cpu=self.kappa.cpu().numpy()
         
         ## Evaluate 2x2 matrix determinant for calculation of streamfunction
         self.determinant=self.kappa2*(self.kappa2+self.F1+self.F2)
