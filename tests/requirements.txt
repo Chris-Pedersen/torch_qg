@@ -3,6 +3,8 @@ numpy
 pytest
 tqdm
 xarray
+pandas
+ipython
 matplotlib
 sphinx==7.2.6
 sphinx-rtd-theme>=1.2.0
