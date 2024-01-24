@@ -38,13 +38,19 @@ valid_loader = DataLoader(
     sampler=SubsetRandomSampler(emulator_dataset.valid_idx),
 )
 
+wandb.init(project="torch_offline", entity="m2lines",config=config,dir="/scratch/cp3759/pyqg_data/wandb_runs")
+## Have to update both the wandb config and the config dict that is passed to the CNN
+wandb.config["save_path"]=wandb.run.dir
+config["save_path"]=wandb.run.dir
+config["wandb_url"]=wandb.run.get_url()
+
+
 ## Define CNN module
 model=fcnn.FCNN(config)
 
 ## Loss function defined in a RegressionSystem module
 system=reg_sys.RegressionSystem(model,config)
 
-wandb.init(project="torch_offline", entity="m2lines",config=config)
 ## Add number of parameters of model to config
 wandb.config["theta learnable parameters"]=sum(p.numel() for p in model.parameters())
 wandb.watch(model, log_freq=1)
@@ -81,5 +87,7 @@ wandb.log({"Random fields": figure_field})
 subgrid_fig=perf.subgrid_energy()
 figure_subgrid=wandb.Image(subgrid_fig)
 wandb.log({"Subgrid energy": figure_subgrid})
+
+model.save_model()
 
 wandb.finish()
