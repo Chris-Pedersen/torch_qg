@@ -3,6 +3,7 @@ import math
 import copy
 import torch
 import xarray as xr
+import torch_qg.util as util
 
 # list for dataset attributes
 attribute_database = [
@@ -219,8 +220,7 @@ class Diagnostics():
         return coordinates
 
     def state_to_dataset(self):
-        """ Convert current state variables to xarray dataset. Do not include
-            spectral quantities """
+        """ Convert current state variables to xarray dataset. """
 
         coords=self.get_coord_dic()
 
@@ -246,6 +246,50 @@ class Diagnostics():
                             { 'units': 'm^3 s^-3',  'long_name': 'Spectral energy transfer'})
             #variables["SPE2"]=(('time','k1d'),np.expand_dims(self.get_aved_diagnostics("SPE2"),axis=0),
             #                { 'units': 'm^3 s^-3',  'long_name': 'Spectral energy transfer'})
+
+        global_attrs = {}
+        for aname in attribute_database:
+            if hasattr(self, aname):
+                data = getattr(self, aname)
+                global_attrs[f"torchqg:{aname}"] = (data)
+
+        ds=xr.Dataset(variables,coords=coords,attrs=global_attrs)
+        ds.attrs['title'] = 'torchqg: 2-layer Quasigeostrophic system evolved in PyTorch'
+        ds.attrs['reference'] = 'https://github.com/Chris-Pedersen/torch_qg'
+
+        return ds
+
+    def forcing_dataset(self,lr_model):
+        """ Produce a dataset of subgrid forcing quantities. Pass a lower resolution model
+            which we will use the filter, rhs and gridpoints from to produce a dataset from """
+
+        ## Set q field in low res model to the downsampled, high res fields
+        ## Dervied quantities are calculated in the low res model automatically
+        ## when set_q1q2 is called
+        lr_model.set_q1q2(torch.fft.irfftn(util.spectral_smoothing(self.qh,self.nx,lr_model),dim=(1,2)))
+        ## Calculate rhs for high res model, then downsample
+        down_rhsh=util.spectral_smoothing(self.rhsh(self.q,self.qh,self.ph,self.u,self.v),self.nx,lr_model)
+        ## Get rhs for low res model
+        lowres_rhsh=lr_model.rhsh(lr_model.q,lr_model.qh,lr_model.ph,lr_model.u,lr_model.v)
+        ## Subgrid forcing field is the difference between these two rhshs
+        S=torch.fft.irfftn(down_rhsh-lowres_rhsh,dim=(1,2))
+
+        ## Store the downwsampled high res q, and the corresponding subgrid forcing field
+        ## in an xarray dataset and return
+        coords = {}
+        coords["time"] = ("time",np.array([self.dt*self.timestep]),
+                        {'long_name': 'model time', 'units': 's'})
+        coords["lev"] = ("lev",np.array([1,2]),{'long_name': 'vertical levels'})
+        coords["x"] = ("x",lr_model.x[:,0].cpu().numpy(),
+                        {'long_name': 'real space grid points in the x direction', 'units': 'grid point',})
+        coords["y"] = ("y",lr_model.y[0,:].cpu().numpy(),
+                        {'long_name': 'real space grid points in the y direction', 'units': 'grid point',})
+
+        variables={}
+        variables["q"]=(('time','lev','y','x'),lr_model.q.cpu().unsqueeze(0).numpy(),
+                { 'units': 's^-1',      'long_name': 'downsampled, high res potential vorticity field',})
+        variables["S"]=(('time','lev','y','x'),S.cpu().unsqueeze(0).numpy(),
+                { 'units': 'm^2 s^-1',      'long_name': 'subgrid forcing field',})
 
         global_attrs = {}
         for aname in attribute_database:

@@ -68,7 +68,7 @@ class BaseQGModel():
         self.gpu=gpu
 
         self.device = torch.device('cpu')
-        ## Set device
+        ## SSet up device-related things
         if self.gpu:
             # use GPUs if available
             if torch.cuda.is_available():
@@ -76,7 +76,10 @@ class BaseQGModel():
                 self.device = torch.device('cuda')
             else:
                 print('CUDA Not Available, using CPU')
-
+        ## If we have a parameterization with a ML model, make sure
+        ## it is on the same device
+        if hasattr(self.parameterization,"model"):
+            self.parameterization.model.to(self.device)
 
         ## Diagnostics config
         self.diagnostics_start=diagnostics_start
@@ -145,7 +148,7 @@ class BaseQGModel():
         ## Field to store parameterization in spectral space at each timestep
         ## used in diagnostics
         self.dqh = None
-        self.height_ratios = (self.Hi / self.H)[:,np.newaxis,np.newaxis]
+        self.height_ratios = torch.tensor((self.Hi / self.H)[:,np.newaxis,np.newaxis],device=self.device)
         
         ## kappa2 represents the wavenumber squared at each gridpoint
         self.kappa2=(self.l**2+self.k**2)
@@ -254,13 +257,12 @@ class BaseQGModel():
         for aa in tqdm(range(steps),disable=self.silence):
             self._step_ab3()
 
-            ## If we hit NaNs, stop the show
-            if torch.sum(torch.isnan(self.q))!=0:
-                print("NaNs in pv field, stopping sim")
-                break
-
             ## Check CFL every 1k timesteps
             if self.timestep % 1000==0:
+                ## If we hit NaNs, stop the show
+                if torch.sum(torch.isnan(self.q))!=0:
+                    print("NaNs in pv field, stopping sim")
+                    break
                 cfl=self.calc_cfl()
                 assert cfl<1., "CFL condition violated"
 
@@ -384,8 +386,9 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
         self.timestep+=1
 
         ## Increment diagnostics
-        if self.timestep>self.diagnostics_start and (self.timestep % self.diagnostics_freq ==0):
-            self._increment_diagnostics()
+        if self.diagnostics_start is not None:
+            if self.timestep>self.diagnostics_start and (self.timestep % self.diagnostics_freq ==0):
+                self._increment_diagnostics()
 
         return
 
@@ -491,7 +494,8 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
         self.timestep+=1
 
         ## Increment diagnostics
-        if self.timestep>self.diagnostics_start and (self.timestep % self.diagnostics_freq ==0):
-            self._increment_diagnostics()
+        if self.diagnostics_start is not None:
+            if self.timestep>self.diagnostics_start and (self.timestep % self.diagnostics_freq ==0):
+                self._increment_diagnostics()
 
         return
