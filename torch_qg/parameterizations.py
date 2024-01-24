@@ -1,5 +1,5 @@
 import torch
-
+import torch_qg.util as util
 
 class Smagorinsky():
     r"""Velocity parameterization from `Smagorinsky 1963`_.
@@ -60,3 +60,62 @@ class Smagorinsky():
         ## Take curl to convert u, v forcing to potential vorticity forcing
         dq = -torch.fft.irfftn(il*torch.fft.rfftn(du,dim=(1,2)),dim=(1,2))+torch.fft.irfftn(ik*torch.fft.rfftn(dv,dim=(1,2)),dim=(1,2))
         return dq
+
+class CNNParameterization():
+    """ pyqg subgrid parameterisation for the potential vorticity"""
+    
+    def __init__(self,model,normalise=True,cache_forcing=False):
+        """ Initialise with a list of torch models, one for each layer """
+        self.model=model
+        self.model.eval() ## Ensure we are in eval
+        self.type="CNN"
+        self.normalise=normalise
+        self.cache_forcing=cache_forcing
+        self.cached_forcing=None
+        self.coeff=1
+
+    def get_cached_forcing(self):
+        return self.cached_forcing
+
+    def __call__(self,*args):
+        """ 
+            Inputs:
+                - Currently the model classes pass a set of args:
+                        q,ph,self.ik,self.il,self.dx
+                  which are needed for the Smagorinsky paramterisation
+                  We only need q for the ML parameterisation, so we just
+                  take the full list of args, assuming that args[0]=q
+            Outputs:
+                - forcing: a numpy array of shape (nz, nx, ny) with the subgrid
+                           forcing values """
+        
+        q=args[0].float()
+        ## Map from physical to normalised space using the factors used to train the network
+        ## Normalise each field individually, then cat arrays back to shape appropriate for a torch model
+        x_upper = util.normalise_field(q[0],self.model.config["q_mean_upper"],self.model.config["q_std_upper"])
+        x_lower = util.normalise_field(q[1],self.model.config["q_mean_lower"],self.model.config["q_std_lower"])
+        q = torch.stack((x_upper,x_lower),dim=0).unsqueeze(0)
+
+        ## Pass the normalised fields through our network
+        q = self.model(q)
+        q=q.clone().detach()
+
+        ## Map back from normalised space to physical units
+        s_upper=util.denormalise_field(q[:,0,:,:],self.model.config["s_mean_upper"],self.model.config["s_std_upper"])
+        s_lower=util.denormalise_field(q[:,1,:,:],self.model.config["s_mean_lower"],self.model.config["s_std_lower"])
+
+        ## Reshape to match pyqg dimensions, and cast to numpy array
+        s=torch.cat((s_upper,s_lower))
+
+        if self.normalise:
+            means=torch.mean(s,axis=(1,2))
+            s[0]=s[0]-means[0]
+            s[1]=s[1]-means[1]
+
+        ## Rescale by scaling coefficient
+        s=s*self.coeff
+
+        if self.cache_forcing:
+            self.cached_forcing=s
+
+        return s

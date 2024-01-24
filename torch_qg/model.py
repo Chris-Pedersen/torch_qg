@@ -68,7 +68,7 @@ class BaseQGModel():
         self.gpu=gpu
 
         self.device = torch.device('cpu')
-        ## Set device
+        ## SSet up device-related things
         if self.gpu:
             # use GPUs if available
             if torch.cuda.is_available():
@@ -76,7 +76,10 @@ class BaseQGModel():
                 self.device = torch.device('cuda')
             else:
                 print('CUDA Not Available, using CPU')
-
+        ## If we have a parameterization with a ML model, make sure
+        ## it is on the same device
+        if hasattr(self.parameterization,"model"):
+            self.parameterization.model.to(self.device)
 
         ## Diagnostics config
         self.diagnostics_start=diagnostics_start
