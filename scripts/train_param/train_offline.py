@@ -13,7 +13,7 @@ import pyqg_explorer.dataset.forcing_dataset as forcing_dataset
 config=reg_sys.config
 config["epochs"]=100
 
-emulator_dataset=forcing_dataset.OfflineDataset("/scratch/cp3759/pyqg_data/sims/torchqg_sims/0_step/all.nc",seed=config["seed"],subsample=config["subsample"],drop_spin_up=config["drop_spin_up"])
+emulator_dataset=forcing_dataset.OfflineDataset("/scratch/cp3759/pyqg_data/sims/torchqg_sims/0_step/all_jet.nc",seed=config["seed"],subsample=config["subsample"],drop_spin_up=config["drop_spin_up"])
 
 ## Need to save renormalisation factors for when the CNN is plugged into pyqg
 config["q_mean_upper"]=emulator_dataset.q_mean_upper
@@ -24,6 +24,7 @@ config["s_mean_upper"]=emulator_dataset.s_mean_upper
 config["s_mean_lower"]=emulator_dataset.s_mean_lower
 config["s_std_upper"]=emulator_dataset.s_std_upper
 config["s_std_lower"]=emulator_dataset.s_std_lower
+
 
 train_loader = DataLoader(
     emulator_dataset,
@@ -37,6 +38,8 @@ valid_loader = DataLoader(
     batch_size=config["batch_size"],
     sampler=SubsetRandomSampler(emulator_dataset.valid_idx),
 )
+
+config["train_set_size"]=len(train_loader.dataset)
 
 wandb.init(project="torch_offline", entity="m2lines",config=config,dir="/scratch/cp3759/pyqg_data/wandb_runs")
 ## Have to update both the wandb config and the config dict that is passed to the CNN
@@ -72,9 +75,13 @@ trainer.fit(system, train_loader, valid_loader)
 ## Run performance tests, and upload figures to wandb
 perf=performance.ParameterizationPerformance(model,valid_loader,threshold=5000)
 
-dist_fig=perf.get_distribution_2d()
-figure_dist=wandb.Image(dist_fig)
-wandb.log({"Distributions": figure_dist})
+dist_fig1=perf.get_distribution()
+figure_dist1=wandb.Image(dist_fig1)
+wandb.log({"Distributions1D": figure_dist1})
+
+dist_fig2=perf.get_distribution_2d(range=2)
+figure_dist2=wandb.Image(dist_fig2)
+wandb.log({"Distributions2D": figure_dist2})
 
 power_fig=perf.get_power_spectrum()
 figure_power=wandb.Image(power_fig)
