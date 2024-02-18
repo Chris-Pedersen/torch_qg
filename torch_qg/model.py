@@ -6,6 +6,8 @@ from tqdm import tqdm
 
 import torch_qg.diagnostics as diagnostics
 
+## Store jet config params for consistency
+jet_config={'rek': 7e-08, 'delta': 0.1, 'beta': 1e-11}
 
 class BaseQGModel():
     def __init__(
@@ -26,6 +28,7 @@ class BaseQGModel():
         silence=False,              # Set to True to disable progress bar (to prevent slurm logs being polluted)
         dtype=torch.float64,        # Set float type for torch tensors
         gpu=True,                   # Use gpu if we can find one
+        grad=False,                 # Store gradients of torch tensors
         **kwargs
         ):
         """
@@ -66,16 +69,16 @@ class BaseQGModel():
         self.silence=silence
         self.dtype=dtype
         self.gpu=gpu
+        self.grad=grad
 
         self.device = torch.device('cpu')
         ## SSet up device-related things
         if self.gpu:
             # use GPUs if available
             if torch.cuda.is_available():
-                print("Using CUDA")
                 self.device = torch.device('cuda')
             else:
-                print('CUDA Not Available, using CPU')
+                print('CUDA Not Available despite being requested, using CPU')
         ## If we have a parameterization with a ML model, make sure
         ## it is on the same device
         if hasattr(self.parameterization,"model"):
@@ -109,6 +112,7 @@ class BaseQGModel():
         self.u_mean=torch.ones((2,self.nx,self.ny),dtype=self.dtype,device=self.device)
         self.u_mean[0]*=self.U1
         self.u_mean[1]*=self.U2
+        self.u_mean.requires_grad_(self.grad)
 
         ## Layer spacing - used in calculations of APE/KE fluxes
         self.del1 = self.delta/(self.delta+1.)
@@ -118,8 +122,8 @@ class BaseQGModel():
         """ Set up real-space and spectral-space grids """
         
         self.x,self.y = torch.meshgrid(
-        torch.arange(0.5,self.nx,1.,dtype=self.dtype, device=self.device)/self.nx*self.L,
-        torch.arange(0.5,self.ny,1.,dtype=self.dtype, device=self.device)/self.ny*self.W )
+        torch.arange(0.5,self.nx,1.,dtype=self.dtype, device=self.device, requires_grad=self.grad)/self.nx*self.L,
+        torch.arange(0.5,self.ny,1.,dtype=self.dtype, device=self.device, requires_grad=self.grad)/self.ny*self.W )
         ## physical grid spacing
         self.dx = self.L / self.nx
         self.dy = self.W / self.ny
@@ -133,9 +137,9 @@ class BaseQGModel():
         ## Define wavenumber arrays - nb that fft comes out
         ## with positive frequencies, then negative frequencies,
         ## and that rfft returns only half the plane
-        self.ll = self.dl*torch.cat((torch.arange(0.,self.nx/2,dtype=self.dtype, device=self.device),
-            torch.arange(-self.nx/2,0.,dtype=self.dtype, device=self.device)))
-        self.kk = self.dk*torch.arange(0.,self.nk,dtype=self.dtype, device=self.device)
+        self.ll = self.dl*torch.cat((torch.arange(0.,self.nx/2,dtype=self.dtype, device=self.device, requires_grad=self.grad),
+            torch.arange(-self.nx/2,0.,dtype=self.dtype, device=self.device, requires_grad=self.grad)))
+        self.kk = self.dk*torch.arange(0.,self.nk,dtype=self.dtype, device=self.device, requires_grad=self.grad)
 
         ## Get wavenumber grids in complex plane
         self.k, self.l = torch.meshgrid(self.kk, self.ll)
@@ -148,12 +152,12 @@ class BaseQGModel():
         ## Field to store parameterization in spectral space at each timestep
         ## used in diagnostics
         self.dqh = None
-        self.height_ratios = torch.tensor((self.Hi / self.H)[:,np.newaxis,np.newaxis],device=self.device)
+        self.height_ratios = torch.tensor((self.Hi / self.H)[:,np.newaxis,np.newaxis],device=self.device, requires_grad=self.grad)
         
         ## kappa2 represents the wavenumber squared at each gridpoint
         self.kappa2=(self.l**2+self.k**2)
         self.kappa=torch.sqrt(self.kappa2)
-        self.kappa_cpu=self.kappa.cpu().numpy()
+        self.kappa_cpu=self.kappa.detach().cpu().numpy()
         
         ## Evaluate 2x2 matrix determinant for calculation of streamfunction
         self.determinant=self.kappa2*(self.kappa2+self.F1+self.F2)
@@ -164,8 +168,8 @@ class BaseQGModel():
         ## spectral grid for isoptrically averaged spectra (in numpy for now)
         ## as this quantity will be output into xarray, and not included in
         ## any backprop
-        ll_max = np.abs(self.ll.cpu()).max()
-        kk_max = np.abs(self.kk.cpu()).max()
+        ll_max = np.abs(self.ll.detach().cpu()).max()
+        kk_max = np.abs(self.kk.detach().cpu()).max()
 
         kmax = np.minimum(ll_max, kk_max)
         self.dkr = np.sqrt(self.dk**2 + self.dl**2)
@@ -186,8 +190,8 @@ class BaseQGModel():
         self.rhs_minus_one=None
         self.rhs_minus_two=None
 
-        self.q=torch.stack((1e-7*torch.rand(self.ny,self.nx,dtype=self.dtype, device=self.device) + 1e-6*(torch.ones((self.ny,1),dtype=self.dtype, device=self.device)
-                                    * torch.rand(1,self.nx,dtype=self.dtype, device=self.device) ),torch.zeros(self.nx,self.nx,dtype=self.dtype, device=self.device)))
+        self.q=torch.stack((1e-7*torch.rand(self.ny,self.nx,dtype=self.dtype, device=self.device, requires_grad=self.grad) + 1e-6*(torch.ones((self.ny,1),dtype=self.dtype, device=self.device, requires_grad=self.grad)
+                                    * torch.rand(1,self.nx,dtype=self.dtype, device=self.device, requires_grad=self.grad) ),torch.zeros(self.nx,self.nx,dtype=self.dtype, device=self.device, requires_grad=self.grad)))
 
         ## Update other state variables
         self.qh=torch.fft.rfftn(self.q,dim=(1,2))
@@ -215,7 +219,7 @@ class BaseQGModel():
             the rhs for the AB3 scheme. """
 
         if type(q)==np.ndarray:
-            self.q=torch.tensor(q,dtype=self.dtype, device=self.device)
+            self.q=torch.tensor(q,dtype=self.dtype, device=self.device, requires_grad=self.grad)
         else:
             ## Ensure we are float64 even if passing a torch tensor
             self.q=q.type(self.dtype)
@@ -415,7 +419,8 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
             n = self.nx // 3
             filtr[:n,:n] = 1
             filtr[-n:,:n] = 1
-        self.filtr = filtr
+        self.filtr = torch.stack((filtr,filtr))
+        self.filtr.requires_grad_(self.grad)
 
         return
     
@@ -435,20 +440,39 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
         ## Advection term
         rhsh=self.advect(q,u,v)
 
-        ## Beta effect
-        rhsh[0]+=-self.ik*self.betas[0]*ph[0]
-        rhsh[1]+=-self.ik*self.betas[1]*ph[1]
-        
-        ## Mean flow
-        rhsh[0]+=-self.ik*self.U1*qh[0]
-        rhsh[1]+=-self.ik*self.U2*qh[1]
+        top=-self.ik*(self.betas[0]*ph[0]+self.U1*qh[0])
+        bottom=-self.ik*(self.betas[1]*ph[1]+self.U2*qh[1])+self.rek*self.kappa2*ph[1]
 
-        ## Bottom drag
-        rhsh[1]+=self.rek*self.kappa2*ph[1]
+        rhsh=rhsh+torch.stack((top,bottom))
 
         if self.parameterization is not None:
             self.dqh=torch.fft.rfftn(self.parameterization(q,ph,self.ik,self.il,self.dx),dim=(1,2))
-            rhsh+=self.dqh
+            rhsh=rhsh+self.dqh
+
+        return rhsh
+
+
+    def rhsh_(self,q,qh,ph,u,v):
+        """ Build a tensor of dq/dt in spectral space.
+            Does not update any state variables. """
+
+        ## Advection term
+        rhsh=self.advect(q,u,v)
+
+        ## Beta effect
+        rhsh[0]=rhsh[0]-self.ik*self.betas[0]*ph[0]
+        rhsh[1]=rhsh[1]-self.ik*self.betas[1]*ph[1]
+        
+        ## Mean flow
+        rhsh[0]=rhsh[0]-self.ik*self.U1*qh[0]
+        rhsh[1]=rhsh[1]-self.ik*self.U2*qh[1]
+
+        ## Bottom drag
+        rhsh[1]=rhsh[1]+self.rek*self.kappa2*ph[1]
+
+        if self.parameterization is not None:
+            self.dqh=torch.fft.rfftn(self.parameterization(q,ph,self.ik,self.il,self.dx),dim=(1,2))
+            rhsh=rhsh+self.dqh
 
         return rhsh
 
@@ -480,8 +504,7 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
             self.rhs_minus_one=rhsh
 
         ## Apply dissipative filter
-        self.qh[0]=self.filtr*self.qh[0]
-        self.qh[1]=self.filtr*self.qh[1]
+        self.qh=self.filtr*self.qh
 
         ## Now we have qh_{i+1}, update 3 remaining states
         self.q=torch.fft.irfftn(self.qh,dim=(1,2))
@@ -495,7 +518,7 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
 
         ## Increment diagnostics
         if self.diagnostics_start is not None:
-            if self.timestep>self.diagnostics_start and (self.timestep % self.diagnostics_freq ==0):
+            if self.timestep>self.diagnostics_start and (self.timestep % self.diagnostics_freq==0):
                 self._increment_diagnostics()
 
         return
