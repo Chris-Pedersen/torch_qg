@@ -33,8 +33,9 @@ def run_forcing(hr_model,lr_model,steps,sampling_freq=1000,increment=2,rollout=4
         else:
             ## If sampling at increments, identify indices to sample at
             should_sample = (aa % sampling_freq == 0) or ((aa % sampling_freq % increment == 0) and aa % sampling_freq <= rollout*increment)
-        ## Don't sample from t=0 (we have no subgrid forcing for very first snapshot)
-        if aa<500:
+        ## Don't sample from spin up! Saving space here
+        ## as we drop these anyway
+        if aa<55990:
             should_sample=False
             
         hr_model._step_ab3()
