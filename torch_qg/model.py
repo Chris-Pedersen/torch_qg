@@ -6,6 +6,8 @@ from tqdm import tqdm
 
 import torch_qg.diagnostics as diagnostics
 
+## Store jet config params for consistency
+jet_config={'rek': 7e-08, 'delta': 0.1, 'beta': 1e-11}
 
 class BaseQGModel():
     def __init__(
@@ -74,10 +76,9 @@ class BaseQGModel():
         if self.gpu:
             # use GPUs if available
             if torch.cuda.is_available():
-                print("Using CUDA")
                 self.device = torch.device('cuda')
             else:
-                print('CUDA Not Available, using CPU')
+                print('CUDA Not Available despite being requested, using CPU')
         ## If we have a parameterization with a ML model, make sure
         ## it is on the same device
         if hasattr(self.parameterization,"model"):
