@@ -34,7 +34,7 @@ def run_forcing(hr_model,lr_model,steps,sampling_freq=1000,increment=2,rollout=4
         ## Don't sample from spin up! Saving space here
         ## as we drop these anyway
         if aa<55990:
-            should_sample=Falsee
+            should_sample=False
             
         hr_model._step_ab3()
         ## Check CFL every 1k timesteps
