@@ -13,8 +13,14 @@ import pyqg_explorer.dataset.forcing_dataset as forcing_dataset
 config=reg_sys.config
 config["epochs"]=100
 config["subsample"]=None
+config["eddy"]=True
 
-emulator_dataset=forcing_dataset.OfflineDataset("/scratch/cp3759/pyqg_data/sims/torchqg_sims/0_step/all.nc",seed=config["seed"],subsample=config["subsample"],drop_spin_up=config["drop_spin_up"])
+if config["eddy"]:
+    flow="eddy"
+else:
+    flow="jet"
+
+emulator_dataset=forcing_dataset.OfflineDataset("/scratch/cp3759/pyqg_data/sims/torchqg_sims/0_step/all_%s.nc" % flow,seed=config["seed"],subsample=config["subsample"],drop_spin_up=config["drop_spin_up"])
 
 ## Need to save renormalisation factors for when the CNN is plugged into pyqg
 config["q_mean_upper"]=emulator_dataset.q_mean_upper
