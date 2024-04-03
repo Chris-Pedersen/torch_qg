@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import tqdm
 
 import torch_qg.diagnostics as diagnostics
+import torch_qg.util as util
 
 ## Store jet config params for consistency
 jet_config={'rek': 7e-08, 'delta': 0.1, 'beta': 1e-11}
@@ -26,9 +27,11 @@ class BaseQGModel():
         diagnostics_start=4e4,      # Number of timesteps after which to start sampling diagnostics
         diagnostics_freq=25,        # Frequency at which to sample diagnostics
         silence=False,              # Set to True to disable progress bar (to prevent slurm logs being polluted)
-        dtype=torch.float64,        # Set float type for torch tensors
+        dtype=torch.float32,        # Set float type for torch tensors
         gpu=True,                   # Use gpu if we can find one
         grad=False,                 # Store gradients of torch tensors
+        thermalizer=None,           # Thermalizer module if we are using it
+        therm_config=None,          # Tuple of (delay, thermalise frequency, number of denoise timesteps)
         **kwargs
         ):
         """
@@ -70,6 +73,8 @@ class BaseQGModel():
         self.dtype=dtype
         self.gpu=gpu
         self.grad=grad
+        self.thermalizer=thermalizer
+        self.therm_config=therm_config
 
         self.device = torch.device('cpu')
         ## SSet up device-related things
@@ -77,6 +82,9 @@ class BaseQGModel():
             # use GPUs if available
             if torch.cuda.is_available():
                 self.device = torch.device('cuda')
+                ## Put thermalizer on gpu if it exists
+                if self.thermalizer:
+                    self.thermalizer=self.thermalizer.to(self.device)
             else:
                 print('CUDA Not Available despite being requested, using CPU')
         ## If we have a parameterization with a ML model, make sure
@@ -278,6 +286,24 @@ class BaseQGModel():
     def _step_ab3(self):
         raise NotImplementedError("Implemented by subclass")
 
+    def apply_thermalizer(self):
+        """ Apply thermalizer to current potential vorticity state fields """
+
+        ## Normalise
+        x_upper = util.normalise_field(self.q[0],self.thermalizer.model.config["q_mean_upper"],self.thermalizer.model.config["q_std_upper"])
+        x_lower = util.normalise_field(self.q[1],self.thermalizer.model.config["q_mean_lower"],self.thermalizer.model.config["q_std_lower"])
+        q_norm = torch.stack((x_upper,x_lower),dim=0)
+
+        ## Thermalize
+        q_norm=self.thermalizer.denoising(q_norm.unsqueeze(0),self.therm_config[2]).squeeze()
+
+        ## Denormalize and update potential vorticity state
+        x_upper = util.denormalise_field(q_norm[0],self.thermalizer.model.config["q_mean_upper"],self.thermalizer.model.config["q_std_upper"])
+        x_lower = util.denormalise_field(q_norm[1],self.thermalizer.model.config["q_mean_lower"],self.thermalizer.model.config["q_std_lower"])
+        self.q=torch.stack((x_upper,x_lower),dim=0)
+
+        return
+
 
 class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
     def __init__(self,minus=1,*args,**kwargs):
@@ -379,6 +405,9 @@ class ArakawaModel(BaseQGModel, diagnostics.Diagnostics):
 
         ## "clean" q
         self.q=self.clean(self.q)
+        if self.thermalizer:
+            if (self.timestep>self.therm_config[0]) and (self.timestep % self.therm_config[1] ==0):
+                self.apply_thermalizer()
         ## self.q is now self.q_{i+1}. Now update the spectral quantities, and streamfunction
         ## such that all state variables are on the same timestep
         self.qh=torch.fft.rfftn(self.q,dim=(1,2))
@@ -508,6 +537,15 @@ class PseudoSpectralModel(BaseQGModel, diagnostics.Diagnostics):
 
         ## Now we have qh_{i+1}, update 3 remaining states
         self.q=torch.fft.irfftn(self.qh,dim=(1,2))
+
+        ## Thermalize if we have a thermalizing module
+        if self.thermalizer:
+            if (self.timestep>self.therm_config[0]) and (self.timestep % self.therm_config[1] ==0):
+                self.apply_thermalizer()
+                ## Thermalizing is done in realspace, so need to update the spectral fields
+                ## from the thermalized real ones
+                self.qh=torch.fft.rfftn(self.q,dim=(1,2))
+
         self.ph=self.invert(self.qh)
         ## Get u, v in spectral space, then ifft to real space
         self.u=torch.fft.irfftn(-self.il*self.ph,dim=(1,2))
